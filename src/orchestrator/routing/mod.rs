@@ -6,6 +6,7 @@
 
 pub mod clusters;
 pub mod decision;
+pub mod dialog;
 pub mod overlays;
 pub mod policy;
 pub mod signals;
@@ -21,5 +22,6 @@ pub use policy::{
     URL_SOFT_COMPEL_HINT,
 };
 pub use signals::{
-    has_agenda_continuation_intent, has_doc_ingest_cues, RoutingSignals,
+    has_agenda_continuation_intent, has_doc_delete_continuation, has_doc_ingest_cues,
+    RoutingSignals,
 };

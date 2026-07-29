@@ -4,10 +4,10 @@
 //! the primary signal; rules only veto, widen, or pair.
 
 use super::clusters::{
-    cluster_members, domains_share_affinity, expand_names_to_domain_clusters, tool_domain,
-    union_clusters_for_tools,
+    cluster_members, domains_share_affinity, tool_domain, union_clusters_for_tools,
 };
 use super::decision::{RoutingDecision, UnsureFallback};
+use super::dialog::try_dialog_pairing;
 use super::signals::RoutingSignals;
 
 /// Lexical / forced hits use this floor so demotion never drops URL/search/news injects.
@@ -38,8 +38,8 @@ pub fn decide(
     registered: &[String],
     knobs: RoutingPolicyKnobs,
 ) -> RoutingDecision {
-    // Rule 1 — agenda dialog pairing (highest priority for the observed doc/agenda miss).
-    if let Some(decision) = rule_agenda_dialog_pairing(signals, registered) {
+    // Rule 1 — dialog pairing (agenda → mail → calendar → gated doc).
+    if let Some(decision) = try_dialog_pairing(signals, registered) {
         return decision;
     }
 
@@ -144,50 +144,6 @@ fn intern_known_domain(d: &str) -> Option<&'static str> {
         "skills" => "skills",
         _ => return None,
     })
-}
-
-fn rule_agenda_dialog_pairing(
-    signals: &RoutingSignals,
-    registered: &[String],
-) -> Option<RoutingDecision> {
-    if !signals.recent_had_agenda || !signals.agenda_continuation || signals.doc_ingest_cues {
-        return None;
-    }
-
-    let suppressed_doc = signals
-        .embed_hits
-        .iter()
-        .any(|(n, s)| n.starts_with("doc:") && *s < FORCED_HIT_FLOOR);
-
-    let mut offered = expand_names_to_domain_clusters(
-        ["agenda:remove", "agenda:complete", "agenda:list"]
-            .into_iter()
-            .map(str::to_string),
-        registered,
-    );
-    let mut front = Vec::new();
-    for preferred in ["agenda:remove", "agenda:complete", "agenda:list"] {
-        if let Some(pos) = offered.iter().position(|n| n == preferred) {
-            front.push(offered.remove(pos));
-        } else if registered.iter().any(|n| n == preferred) {
-            front.push(preferred.to_string());
-        }
-    }
-    front.append(&mut offered);
-    offered = front;
-
-    tracing::info!(
-        suppressed_doc_hits = suppressed_doc,
-        offered = ?offered,
-        event = "routing.policy.agenda_dialog_pairing",
-        "Agenda dialog continuation; offering agenda cluster (doc lock-in suppressed)"
-    );
-
-    Some(RoutingDecision::domain_cluster(
-        "AGENDA_DIALOG_PAIRING",
-        vec!["agenda"],
-        offered,
-    ))
 }
 
 fn rule_unsure_after_demotion(

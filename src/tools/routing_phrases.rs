@@ -35,13 +35,13 @@ pub fn fallback_triggers(tool_name: &str) -> &'static str {
             "show tasks, what is on my list, pending items, show agenda, my schedule, what do I have to do"
         }
         "agenda:remove" => {
-            "remove task, cancel agenda item, delete from list, drop task, never mind that reminder, scratch that task"
+            "remove task, cancel agenda item, delete agenda item, drop task, never mind that reminder, cancel that task, take off my todo list, scratch that task"
         }
         "agenda:remind_at" => {
-            "remind me at, remind me in, remind me about, remind me tomorrow, remember to, nudge me at, ping me at, todo reminder, snooze task, alarm for my task, at 3pm for this, on my agenda, on my todo list, task_id reminder, in two minutes, in 2 minutes, multi-step task, several steps later, then send email, remind yourself to, delayed checklist"
+            "remind me at, remind me in, remind me about, remind me tomorrow, remember to, nudge me at, todo reminder, snooze task, agenda-linked reminder, remind me about this task, errand reminder, at 3pm for this, on my agenda, on my todo list, task_id reminder, in two minutes for this task, multi-step task, several steps later, then send email, remind yourself to, delayed checklist"
         }
         "agenda:complete" => {
-            "finishing tasks, mark done, complete task, check off, task finished, I did it"
+            "finishing tasks, mark done, complete task, check off the task, task finished, finished the reminded task, I did it"
         }
         "web:fetch" => {
             "fetching URLs, open this link, check this website, browse this page, read this article, get content from URL"
@@ -63,10 +63,10 @@ pub fn fallback_triggers(tool_name: &str) -> &'static str {
         }
         "clock:now" => "what time is it, current time, timezone, date now, local time",
         "clock:timer" => {
-            "generic timer in 30 minutes, countdown, stretch break, ping me in, not tied to agenda list, label-only reminder"
+            "generic timer in 30 minutes, countdown, stretch break, ping me in for a break, not tied to agenda list, label-only timer"
         }
         "clock:alarm" => {
-            "wake me up, wake alarm, alarm clock only, no task just alarm, not on my todo list, standalone alarm no agenda, no errand, bell only"
+            "wake me up, wake alarm, alarm clock only, no task just alarm, not on my todo list, standalone alarm no agenda, no errand, bell only, wake-up alarm, just ring at 7"
         }
         "weather:current" => {
             "weather now, temperature outside, is it raining, rainfall, sunny or cloudy, conditions today, current conditions, what's the weather like"
@@ -87,7 +87,7 @@ pub fn fallback_triggers(tool_name: &str) -> &'static str {
             "read email, open message, show email, email details, message content, full email, read message, opens mail, full gmail body, message id, open thread body"
         }
         "mail:write" => {
-            "send email, compose mail, write email, reply, email to, send a message, draft email, dispatch mail, send the greeting, send mail"
+            "send email, compose mail, write email, reply to that email, reply via gmail, email to, send a message, draft email, dispatch mail, send the greeting, send mail"
         }
         "mail:digest" => {
             "summarize email, today's mail, digest inbox, what came in today, recap messages, overview of recent gmail, batch list mail"

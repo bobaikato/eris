@@ -10,7 +10,7 @@ tool_name = "agenda:complete"
 short_description = "Mark a queued agenda task as completed."
 when_to_use = "Use when the user clearly finished the task (especially after an agenda-linked alarm): call with task_id from agenda:list or AGENDA_CONFIRM line. Prefer explicit user wording (\"done\", \"finished\") before closing."
 when_not_to_use = "Do not use to create tasks. Do not infer completion from vague one-line replies; ask or use agenda:remind_at if they need another reminder."
-routing_hints = ["task done", "complete task", "mark done", "done with reminder", "alarm task finished", "finished the goldfish check"]
+routing_hints = ["task done", "complete task", "mark done", "done with reminder", "finished the reminded task", "check off the task"]
 
 [[examples_good]]
 name = "complete_task"
@@ -70,7 +70,7 @@ tool_name = "agenda:remove"
 short_description = "Remove a pending agenda task without completion logging."
 when_to_use = "Use to cancel a queued task: pass task_id from agenda:list, or description_match with a substring of the real task text (must match exactly one task)."
 when_not_to_use = "Do not use agenda:push to cancel; do not use for finished-task logging (use agenda:complete)."
-routing_hints = ["remove task", "cancel agenda", "delete from list", "drop task", "never mind"]
+routing_hints = ["remove task", "cancel agenda", "delete agenda item", "drop task", "never mind that reminder", "cancel that task", "take off my todo list"]
 
 [[examples_good]]
 name = "remove_by_id"
@@ -105,13 +105,14 @@ routing_hints = [
     "remember to",
     "do not forget",
     "nudge me at",
-    "ping me at",
     "todo reminder",
     "snooze this task",
-    "alarm for my task",
+    "agenda-linked reminder",
+    "remind me about this task",
+    "errand reminder",
     "in 10 minutes for this",
-    "in two minutes",
-    "in 2 minutes",
+    "in two minutes for this task",
+    "in 2 minutes for this task",
     "at 3pm for this",
     "schedule this reminder",
     "on my agenda",
@@ -423,7 +424,7 @@ short_description = "Search the web via browser39 [search].engine (default DuckD
 when_to_use = "Use when the user asks to search the web in natural language (no URL). Query must be plain text. Search provider URL must be on web_allowlist (e.g. html.duckduckgo.com)."
 when_not_to_use = "Do not use when the user gave a full URL (use web:fetch). After search, use web:find on artifact_id — do not web:fetch the SERP URL again. Not for BBC headline digest (news:today). Disabled when [web].search_enabled is false."
 suggested_skills = ["web-fetch-workflow"]
-routing_hints = ["search the web", "google", "look up online", "find on the internet", "duckduckgo"]
+routing_hints = ["search the web", "google", "look up online", "find on the internet", "duckduckgo", "web search for", "search online for"]
 
 [[examples_good]]
 name = "bundesliga_search"
@@ -441,7 +442,7 @@ short_description = "Fetch a news homepage and return ranked headline links; opt
 when_to_use = "Use for today's headlines, top stories, or a news digest from a homepage. Pass homepage_url for any allowlisted outlet (e.g. https://www.bbc.com/, https://taz.de/). Omit homepage_url to use news_today_default_homepage, or pass category (world, uk, politics, …) to build a section URL from news_today_site_base. Prefer over repeating identical web:fetch in the same turn. Set deep_fetch_top_n (1–3) for article bodies."
 when_not_to_use = "Do not use for a one-off article URL (use web:fetch) or plain-language web search (use web:search). Requires matching .fcp/web_allowlist.toml patterns. Not registered when news_today_enabled is false."
 suggested_skills = ["web-fetch-workflow"]
-routing_hints = ["todays news", "headlines", "top stories", "morning news", "news digest", "breaking news", "what is happening", "front page", "politics headlines", "science news", "business news", "economics news", "world news", "uk news"]
+routing_hints = ["todays news", "headlines", "top stories", "morning news", "news digest", "breaking news", "what is in the news", "what is happening in the news", "front page", "politics headlines", "science news", "business news", "economics news", "world news", "uk news"]
 
 [[examples_good]]
 name = "default_bbc_news_listing"
@@ -512,7 +513,7 @@ tool_name = "clock:alarm"
 short_description = "Wall-clock alarm at hour:minute local (24h) with a label only — no agenda row. Narrow use: wake-style or alarm-only pings, not tracked todos."
 when_to_use = "Use only when the user wants a fixed local time alarm without a todo to track or complete: wake up, alarm clock, short bell, no list item. Not for remind me to do X."
 when_not_to_use = "Do not use for remind me to errands, tasks, or anything that belongs on the agenda — use agenda:remind_at. Do not use for in N minutes (use clock:timer). Do not use for a specific agenda task_id (use agenda:remind_at)."
-routing_hints = ["wake me up", "wake alarm", "alarm clock only", "no task just alarm", "not on my todo list", "just wake me", "standalone alarm no agenda", "no errand to track", "bell only"]
+routing_hints = ["wake me up", "wake alarm", "alarm clock only", "no task just alarm", "not on my todo list", "just wake me", "standalone alarm no agenda", "no errand to track", "bell only", "wake-up alarm", "just ring at 7"]
 
 [[examples_good]]
 name = "morning"
@@ -715,7 +716,8 @@ routing_hints = [
     "send email",
     "compose mail",
     "write email",
-    "reply",
+    "reply to that email",
+    "reply via gmail",
     "email to",
     "send a message",
     "dispatch mail",
@@ -1355,7 +1357,7 @@ tool_name = "doc:delete"
 short_description = "Remove an ingested document from the RAG store and memory discovery tier."
 when_to_use = "Use when the user wants a document fully removed from search (chunks + 40_MEDIA card)."
 when_not_to_use = "Do not use to delete raw upload bytes only — removes indexed chunks and catalog card."
-routing_hints = ["delete document", "remove ingested pdf", "unindex document"]
+routing_hints = ["delete document", "remove ingested pdf", "unindex document", "delete uploaded document from rag", "remove that document from search"]
 
 [[examples_good]]
 name = "delete_by_id"
