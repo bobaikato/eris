@@ -502,8 +502,25 @@ mod tests {
         assert!(names.contains(&"clock:timer".to_string()));
         assert!(names.contains(&"agenda:list".to_string()));
         assert!(!names.contains(&"doc:ingest".to_string()));
+        // Seed hit leads; unscored clock:* siblings inherit ~top and may rank before agenda.
         assert_eq!(names[0], "clock:alarm");
-        assert_eq!(names[1], "agenda:remind_at");
+        let agenda_pos = names
+            .iter()
+            .position(|n| n == "agenda:remind_at")
+            .expect("agenda:remind_at in affinity union");
+        assert!(
+            agenda_pos > 0,
+            "agenda seed should follow clock:alarm, got {names:?}"
+        );
+        // All clock:* from the union should still beat the agenda seed score (0.59).
+        for (i, n) in names.iter().enumerate() {
+            if n.starts_with("clock:") {
+                assert!(
+                    i < agenda_pos,
+                    "clock sibling {n} should rank before agenda:remind_at, got {names:?}"
+                );
+            }
+        }
     }
 
     #[test]
