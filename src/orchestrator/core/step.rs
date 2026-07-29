@@ -131,7 +131,9 @@ impl<E: LlmEngine> Orchestrator<E> {
         }
 
         // ── Pre-LLM semantic routing ─────────────────────────────────
-        let (mut tools_needed, pre_llm_matched_tools) = self.run_pre_llm_routing().await;
+        let routing = self.run_pre_llm_routing().await;
+        let mut tools_needed = routing.tools_needed();
+        let pre_llm_matched_tools = routing.matched_tool_names();
         let mut execution_ledger: HashMap<String, ToolIntentTicket> = HashMap::new();
         let mut schema_recovery_attempted: HashSet<String> = HashSet::new();
         let mut targeted_tools: HashSet<String> = HashSet::new();
