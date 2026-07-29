@@ -236,6 +236,16 @@ impl<E: LlmEngine> Orchestrator<E> {
         for name in candidates {
             targeted_tools.insert(name);
         }
+        let registered = self.gatekeeper.registered_tool_names();
+        let expanded = crate::orchestrator::routing::expand_names_to_domain_clusters(
+            targeted_tools.iter().cloned(),
+            &registered,
+        );
+        for name in expanded {
+            if allowed.contains(&name) {
+                targeted_tools.insert(name);
+            }
+        }
         crate::orchestrator::llm_support::post_tool_guidance::ensure_web_find_paired_with_fetch_tools(
             targeted_tools,
             &allowed,
@@ -247,7 +257,7 @@ impl<E: LlmEngine> Orchestrator<E> {
         self.force_full_tool_schemas_in_llm_view = true;
         tracing::info!(
             targeted_tools = ?targeted_tools,
-            "Recover pass armed with targeted full tool schemas"
+            "Recover pass armed with targeted full tool schemas (domain-cluster widened)"
         );
     }
 

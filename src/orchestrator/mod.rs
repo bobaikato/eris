@@ -4,6 +4,7 @@ pub mod core;
 pub mod heartbeat;
 pub mod llm_support;
 pub mod r#loop;
+pub mod routing;
 pub mod state;
 pub mod tool_router;
 

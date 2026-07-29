@@ -268,6 +268,7 @@ impl<E: LlmEngine> Orchestrator<E> {
                     }
                     self.tool_rounds += 1;
                     self.recovery_count = 0;
+                    self.record_successful_tool(&tool_name);
                     tracing::info!(
                         tool = %tool_name,
                         intent_id = %intent_id,
@@ -568,6 +569,28 @@ impl<E: LlmEngine> Orchestrator<E> {
 
         if targeted_recovery_requested {
             self.force_full_tool_schemas_in_llm_view = true;
+            let registered = self.gatekeeper.registered_tool_names();
+            let allowed: HashSet<String> = self
+                .gatekeeper
+                .get_allowed_tools(&AgentState::Chat)
+                .into_iter()
+                .filter_map(|t| {
+                    t.get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(|n| n.as_str())
+                        .map(|s| s.to_string())
+                })
+                .collect();
+            let expanded = crate::orchestrator::routing::expand_names_to_domain_clusters(
+                targeted_tools.iter().cloned(),
+                &registered,
+            );
+            for name in expanded {
+                if allowed.contains(&name) {
+                    targeted_tools.insert(name);
+                }
+            }
+            ensure_web_find_paired_with_fetch_tools(targeted_tools, &allowed);
             let selected = targeted_tools.iter().cloned().collect::<Vec<_>>();
             let msg = if self.config.is_llamacpp() {
                 let mut blocks: Vec<String> = Vec::new();
@@ -595,7 +618,7 @@ impl<E: LlmEngine> Orchestrator<E> {
                     selected
                 )
             };
-            tracing::info!(targeted_tools = ?selected, "Triggering targeted schema-fault recovery retry");
+            tracing::info!(targeted_tools = ?selected, "Triggering targeted schema-fault recovery retry (domain-cluster widened)");
             return Ok(ToolBatchDecision::RetryWithTargetedSchema { message: msg });
         }
 
@@ -618,12 +641,34 @@ impl<E: LlmEngine> Orchestrator<E> {
                         .map(|s| s.to_string())
                 })
                 .collect();
+            // Widen failed tools to their domain clusters so recovery is not locked onto
+            // the single wrong tool (e.g. doc:ingest → all doc:* + dialog seeds).
+            let registered = self.gatekeeper.registered_tool_names();
+            let expanded = crate::orchestrator::routing::expand_names_to_domain_clusters(
+                targeted_tools.iter().cloned(),
+                &registered,
+            );
+            for name in expanded {
+                if allowed.contains(&name) {
+                    targeted_tools.insert(name);
+                }
+            }
+            for recent in &self.recent_successful_tools {
+                if let Some(domain) = crate::orchestrator::routing::tool_domain(recent) {
+                    for name in crate::orchestrator::routing::cluster_members(domain, &registered)
+                    {
+                        if allowed.contains(&name) {
+                            targeted_tools.insert(name);
+                        }
+                    }
+                }
+            }
             ensure_web_find_paired_with_fetch_tools(targeted_tools, &allowed);
             if !targeted_tools.is_empty() {
                 self.force_full_tool_schemas_in_llm_view = true;
                 tracing::info!(
                     targeted_tools = ?targeted_tools,
-                    "Recoverable tool failure: targeted full schemas for retry"
+                    "Recoverable tool failure: targeted full schemas for retry (domain-cluster widened)"
                 );
             }
             let msg = recover_override_message_for_tool_failure(&reason);

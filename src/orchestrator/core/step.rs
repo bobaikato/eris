@@ -312,6 +312,27 @@ impl<E: LlmEngine> Orchestrator<E> {
                 system_prompt.push_str("\n\n---\n\n");
                 system_prompt.push_str(&skill);
             }
+            // Soft-compel: URL in user text + web:fetch offered → prompt bias (Idle still allowed).
+            if tools_needed
+                && crate::orchestrator::routing::should_soft_compel_web_fetch(
+                    self.last_user_content(),
+                )
+            {
+                // Empty matched tools = full roster (fetch available). Named hits must include fetch.
+                let fetch_offered = pre_llm_matched_tools.is_empty()
+                    || pre_llm_matched_tools.iter().any(|n| n == "web:fetch");
+                if fetch_offered {
+                    system_prompt.push_str("\n\n---\n\n");
+                    system_prompt
+                        .push_str(crate::orchestrator::routing::URL_SOFT_COMPEL_HINT);
+                    tracing::info!(
+                        category = routing_codes::CATEGORY_ROUTING,
+                        issue = routing_codes::ISSUE_PRELLM_URL_SOFT_COMPEL,
+                        turn_seq = self.turn_seq,
+                        "URL soft-compel hint injected into system prompt"
+                    );
+                }
+            }
             Self::upsert_system_prompt(&mut self.chat_stack, system_prompt);
 
             if self.config.optimize_context_proactive_condensation {
