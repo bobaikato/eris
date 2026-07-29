@@ -108,8 +108,13 @@ pub fn compile_fcp_envelope_grammar_dynamic(tools: &[ToolGrammarEntry]) -> Strin
         }
     }
 
-    let alternation = alternation_parts.join("\n  | ");
-    grammar.push_str(&format!("tool-with-args ::=\n    {alternation}\n"));
+    // Single-line alternation. llama.cpp's GBNF parser rejects a `|` that begins a
+    // continuation line after `::=` / a prior alternative (`expecting name at |`),
+    // then llama-server *fails open* and generates unconstrained text while still
+    // returning HTTP 200 — so a pretty-printed multi-line `tool-with-args` silently
+    // disables the entire envelope grammar whenever 2+ tools are offered.
+    let alternation = alternation_parts.join(" | ");
+    grammar.push_str(&format!("tool-with-args ::= {alternation}\n"));
 
     grammar
 }
@@ -298,6 +303,83 @@ mod tests {
                 grammar.contains("json-object"),
                 "fallback tool should use json-object"
             );
+        }
+
+        /// Regression: multi-tool `tool-with-args` must stay on one line. A `\n  | `
+        /// form is rejected by llama.cpp (`expecting name at |`) and the server then
+        /// ignores the grammar entirely (fail-open → unconstrained prose).
+        #[test]
+        fn dynamic_multi_tool_alternation_is_single_line() {
+            let entries = vec![
+                typed_entry("skills:create", "skills-create-args", "\"{\" ws \"}\""),
+                typed_entry("skills:list", "skills-list-args", "\"{\" ws \"}\""),
+                fallback_entry("web:fetch"),
+            ];
+            let grammar = compile_fcp_envelope_grammar_dynamic(&entries);
+
+            let rule_line = grammar
+                .lines()
+                .find(|l| l.starts_with("tool-with-args ::="))
+                .expect("tool-with-args rule");
+            assert!(
+                rule_line.contains(" | "),
+                "expected in-line alternation separators: {rule_line}"
+            );
+            assert!(
+                rule_line.contains("skills:create") && rule_line.contains("skills:list"),
+                "all tools must appear on the tool-with-args line: {rule_line}"
+            );
+            assert!(
+                !grammar.contains("\n  | ") && !grammar.contains("\n| "),
+                "multiline `|` continuations break llama.cpp GBNF parsing"
+            );
+
+            // Optional live check when the llama.cpp validator binary is on PATH /
+            // ERIS_GBNF_VALIDATOR (local/dev; skipped quietly in CI without the binary).
+            if let Some(status) = try_llama_gbnf_validate(&grammar) {
+                assert!(
+                    status.success(),
+                    "llama.cpp rejected multi-tool envelope GBNF (exit {:?})",
+                    status.code()
+                );
+            }
+        }
+
+        /// Returns `Some(ExitStatus)` when a validator binary was found and invoked.
+        fn try_llama_gbnf_validate(grammar: &str) -> Option<std::process::ExitStatus> {
+            use std::process::Command;
+
+            let bin = std::env::var_os("ERIS_GBNF_VALIDATOR")
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    let home = std::env::var_os("LLAMA_CPP_HOME")?;
+                    let candidates = [
+                        "build-cuda/bin/test-gbnf-validator",
+                        "build/bin/test-gbnf-validator",
+                        "bin/test-gbnf-validator",
+                    ];
+                    candidates.into_iter().find_map(|rel| {
+                        let p = std::path::PathBuf::from(&home).join(rel);
+                        p.is_file().then_some(p)
+                    })
+                })?;
+
+            let dir = tempfile::tempdir().ok()?;
+            let grammar_path = dir.path().join("envelope.gbnf");
+            let input_path = dir.path().join("sample.json");
+            std::fs::write(&grammar_path, grammar).ok()?;
+            std::fs::write(
+                &input_path,
+                r#"{"thought":"x","status":"Idle","message_to_user":"hi","tool_calls":[]}"#,
+            )
+            .ok()?;
+
+            Command::new(&bin)
+                .arg(&grammar_path)
+                .arg(&input_path)
+                .output()
+                .ok()
+                .map(|o| o.status)
         }
 
         #[test]
