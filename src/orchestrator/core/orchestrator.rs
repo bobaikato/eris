@@ -116,6 +116,9 @@ pub struct Orchestrator<E: LlmEngine> {
     pub(super) tool_repeat_failure_streak: HashMap<String, u8>,
     /// Tool names that failed in the current `step()`; used to prioritize recovery JIT skill guidance.
     pub(super) step_failed_tools: HashSet<String>,
+    /// Session-scoped recent successful tool names (newest last, capped). Used by Phase-1
+    /// agenda dialog pairing so “remove it” after `agenda:list` does not lock onto a weak `doc:*` hit.
+    pub(super) recent_successful_tools: Vec<String>,
     /// llama.cpp only: memoized GBNF strings keyed by sorted tool names for per-turn subset grammar.
     pub(super) gbnf_subset_cache: GbnfSubsetCache,
     /// Anti-crawl ledger shared with web tools (reset at chat bootstrap).
@@ -239,6 +242,7 @@ impl<E: LlmEngine> Orchestrator<E> {
             moltbook_browse_ledger: None,
             tool_repeat_failure_streak: HashMap::new(),
             step_failed_tools: HashSet::new(),
+            recent_successful_tools: Vec::new(),
             token_metrics_rx,
             gbnf_subset_cache: GbnfSubsetCache::new(),
             web_ledger,

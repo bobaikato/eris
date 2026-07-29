@@ -818,6 +818,19 @@ pub struct AppConfig {
     pub vault_read_ratio: f32,
     /// Cosine similarity floor for ToolRouter pre-LLM semantic matches (0.0–1.0).
     pub tool_match_threshold: f32,
+    /// Lone semantic hit below this score is demoted (empty → full roster) to avoid GBNF lock-in.
+    /// Lexical forced hits (≥ ~0.99) are never demoted. Default mirrors the Moltbook soft floor (0.58).
+    #[serde(default = "default_tool_single_hit_floor")]
+    pub tool_single_hit_floor: f32,
+    /// When top−second score gap is below this margin and the near-ties span multiple domains
+    /// (e.g. `clock:` vs `agenda:`), offer the union of those domain clusters instead of locking
+    /// onto the single top tool.
+    #[serde(default = "default_tool_match_margin")]
+    pub tool_match_margin: f32,
+    /// When a lone weak embed hit is demoted: `"full_roster"` (default) or `"domain_cluster"`
+    /// (expand that tool's prefix cluster instead of opening the full allowed roster).
+    #[serde(default = "default_tool_unsure_fallback")]
+    pub tool_unsure_fallback: String,
     /// Number of semantic-router hits that receive extra “when to use” descriptor text in tool mode.
     #[serde(default = "default_tool_descriptor_jit_top_k")]
     pub tool_descriptor_jit_top_k: usize,
@@ -1037,6 +1050,18 @@ fn default_slim_tool_prompt() -> bool {
 /// With slim tool prompt + semantic hits, cap how many matched tools appear in the phrase map; `0` = no cap.
 fn default_tool_map_offer_cap() -> usize {
     0
+}
+
+fn default_tool_single_hit_floor() -> f32 {
+    0.58
+}
+
+fn default_tool_match_margin() -> f32 {
+    0.05
+}
+
+fn default_tool_unsure_fallback() -> String {
+    "full_roster".into()
 }
 
 /// When true, chat startup fails if Qdrant is unreachable after retries.
@@ -1778,6 +1803,9 @@ impl Default for AppConfig {
             news_today_deep_fetch_max_default: default_news_today_deep_fetch_max(),
             vault_read_ratio: 0.5,
             tool_match_threshold: 0.50,
+            tool_single_hit_floor: default_tool_single_hit_floor(),
+            tool_match_margin: default_tool_match_margin(),
+            tool_unsure_fallback: default_tool_unsure_fallback(),
             tool_descriptor_jit_top_k: default_tool_descriptor_jit_top_k(),
             tool_descriptor_jit_max_chars: default_tool_descriptor_jit_max_chars(),
             slim_tool_prompt: default_slim_tool_prompt(),
@@ -2251,6 +2279,9 @@ mod tests {
             (32_768_f32 * 0.9_f32).floor() as usize
         );
         assert_eq!(parsed_config.tool_match_threshold, 0.50);
+        assert_eq!(parsed_config.tool_single_hit_floor, 0.58);
+        assert_eq!(parsed_config.tool_match_margin, 0.05);
+        assert_eq!(parsed_config.tool_unsure_fallback, "full_roster");
         assert_eq!(parsed_config.ollama_daemon.command, "ollama");
         assert_eq!(parsed_config.ollama_daemon.args, vec!["serve"]);
         assert_eq!(parsed_config.unload_ollama_models_on_chat_exit, true);

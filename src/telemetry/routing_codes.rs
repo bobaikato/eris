@@ -17,6 +17,13 @@ pub const ISSUE_PRELLM_ROUTER_UNAVAILABLE: &str = "PRELLM_ROUTER_UNAVAILABLE";
 pub const ISSUE_PRELLM_SEMANTIC_EMPTY: &str = "PRELLM_SEMANTIC_EMPTY";
 pub const ISSUE_PRELLM_SEMANTIC_HIT: &str = "PRELLM_SEMANTIC_HIT";
 pub const ISSUE_PRELLM_MATCH_ERROR: &str = "PRELLM_MATCH_ERROR";
+/// Phase-1 policy rewrote the offer (demotion, cluster union, agenda dialog pairing, …).
+pub const ISSUE_PRELLM_POLICY_REWRITE: &str = "PRELLM_POLICY_REWRITE";
+/// URL present and web:fetch offered — soft-compel hint injected into the system prompt.
+pub const ISSUE_PRELLM_URL_SOFT_COMPEL: &str = "PRELLM_URL_SOFT_COMPEL";
+/// URL present and web:fetch was offered this hop, but the model did not call `web:fetch`
+/// (Idle reply or other tools). Scorecard for soft-compel / opinion-only tuning.
+pub const ISSUE_PRELLM_URL_SKIP_FETCH: &str = "PRELLM_URL_SKIP_FETCH";
 /// Post-LLM: model emitted valid envelope JSON then non-whitespace prose after the closing `}`.
 pub const ISSUE_LLM_TRAILING_AFTER_JSON: &str = "LLM_TRAILING_AFTER_JSON";
 

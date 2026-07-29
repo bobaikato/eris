@@ -72,6 +72,9 @@ impl GbnfSubsetCache {
 
 /// Single source of truth for the slim offered-tool list: used by both slim prompt
 /// assembly and the per-hop GBNF subset grammar in [`super::step::Orchestrator::step`].
+///
+/// Implementation lives in [`crate::orchestrator::routing::overlays`] so prompt and
+/// grammar cannot drift apart.
 pub(crate) fn slim_offered_tool_names(
     pre_llm_matched_tools: &[String],
     tool_map_offer_cap: usize,
@@ -79,45 +82,13 @@ pub(crate) fn slim_offered_tool_names(
     gatekeeper: &Gatekeeper,
     state: &AgentState,
 ) -> Vec<String> {
-    let mut offered: Vec<String> = if pre_llm_matched_tools.is_empty() {
-        vec![]
-    } else if tool_map_offer_cap == 0 {
-        pre_llm_matched_tools.to_vec()
-    } else {
-        pre_llm_matched_tools
-            .iter()
-            .take(tool_map_offer_cap)
-            .cloned()
-            .collect()
-    };
-
-    if moltbook_overlay_latched && !offered.is_empty() {
-        for name in gatekeeper.allowed_tool_names_with_prefix(state, "moltbook:") {
-            if !offered.contains(&name) {
-                offered.push(name);
-            }
-        }
-    }
-
-    let needs_web_find = offered.iter().any(|n| n == "web:fetch" || n == "web:search");
-    if needs_web_find {
-        let find_allowed = gatekeeper
-            .allowed_tool_names_with_prefix(state, "web:")
-            .into_iter()
-            .any(|n| n == "web:find");
-        if find_allowed && !offered.iter().any(|n| n == "web:find") {
-            offered.push("web:find".to_string());
-        }
-    }
-
-    if offered.iter().any(|n| n == "doc:read")
-        && !offered.iter().any(|n| n == "vault:write")
-        && Gatekeeper::state_allows_tool(state, "vault:write")
-    {
-        offered.push("vault:write".to_string());
-    }
-
-    offered
+    crate::orchestrator::routing::apply_offer_overlays(
+        pre_llm_matched_tools,
+        tool_map_offer_cap,
+        moltbook_overlay_latched,
+        gatekeeper,
+        state,
+    )
 }
 
 #[cfg(test)]
