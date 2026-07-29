@@ -40,6 +40,7 @@ Logs carry `rule_id` and `offer_kind` on pre-LLM routing events — grep those w
 | Weak lone-hit demotion / margin / unsure fallback knobs | Config: `tool_match_threshold`, `tool_single_hit_floor`, `tool_match_margin`, `tool_unsure_fallback`. Logic: `routing/policy.rs` |
 | Slim map ↔ GBNF pairing (`web:find` with fetch, `doc:read`→`vault:write`, moltbook latch) | `routing/overlays.rs` (single source; `llama_gbnf_subset` re-exports) |
 | Decision type / log labels | `routing/decision.rs` |
+| URL soft-compel / opinion-only / skip-fetch scorecard | `routing/policy.rs` (`should_soft_compel_web_fetch`); log `PRELLM_URL_SOFT_COMPEL` / `PRELLM_URL_SKIP_FETCH` from `step.rs`. Offline offer goldens: `src/benchmark/routing_offer_fixtures.rs` |
 
 ### Hint hygiene (do this when writing `routing_hints`)
 

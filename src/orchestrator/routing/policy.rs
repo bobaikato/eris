@@ -331,18 +331,29 @@ pub fn rerank_offered_by_cosine(offered: &[String], hits: &[(String, f32)]) -> V
     ranked
 }
 
+/// True when the user message looks like it contains a URL / host.
+#[must_use]
+pub fn user_text_has_url(user_text: &str) -> bool {
+    let lower = user_text.to_ascii_lowercase();
+    lower.contains("http://") || lower.contains("https://") || lower.contains("www.")
+}
+
 /// Prefer calling `web:fetch` this turn unless the user clearly wants opinion-only chatter.
+///
+/// Opinion-only (URL present, no fetch verbs): "do you know", "have you heard",
+/// "what do you think", prior-knowledge phrasing — Idle with empty `tool_calls` is allowed
+/// and we skip injecting [`URL_SOFT_COMPEL_HINT`]. Lexical URL inject may still offer fetch.
 #[must_use]
 pub fn should_soft_compel_web_fetch(user_text: &str) -> bool {
-    let lower = user_text.to_ascii_lowercase();
-    let has_url = lower.contains("http://")
-        || lower.contains("https://")
-        || lower.contains("www.");
-    if !has_url {
+    if !user_text_has_url(user_text) {
         return false;
     }
+    let lower = user_text.to_ascii_lowercase();
     if has_explicit_fetch_verb(&lower) {
         return true;
+    }
+    if is_opinion_only_url_chat(&lower) {
+        return false;
     }
     true
 }
@@ -362,6 +373,22 @@ fn has_explicit_fetch_verb(lower: &str) -> bool {
     ]
     .iter()
     .any(|v| lower.contains(v))
+}
+
+/// Plan Phase-1/3: opinion without an explicit read/fetch ask.
+fn is_opinion_only_url_chat(lower: &str) -> bool {
+    const CUES: &[&str] = &[
+        "do you know",
+        "have you heard",
+        "what do you think",
+        "your opinion",
+        "from your knowledge",
+        "without reading",
+        "without fetching",
+        "without opening",
+        "just tell me what you think",
+    ];
+    CUES.iter().any(|c| lower.contains(c))
 }
 
 /// System-prompt block when a URL is present and web:fetch is in the offer.
@@ -528,9 +555,30 @@ mod tests {
     }
 
     #[test]
-    fn soft_compel_true_for_url() {
+    fn soft_compel_true_for_fetch_ask_with_url() {
         assert!(should_soft_compel_web_fetch(
+            "please open https://github.com/vllm-project/semantic-router and summarize"
+        ));
+        assert!(should_soft_compel_web_fetch(
+            "check out https://eris-system.dev"
+        ));
+        // Bare URL / non-opinion phrasing still soft-compels.
+        assert!(should_soft_compel_web_fetch(
+            "https://github.com/vllm-project/semantic-router"
+        ));
+    }
+
+    #[test]
+    fn soft_compel_false_for_opinion_only_with_url() {
+        assert!(!should_soft_compel_web_fetch(
             "do you know this repo? https://github.com/vllm-project/semantic-router"
+        ));
+        assert!(!should_soft_compel_web_fetch(
+            "have you heard of https://example.com — what do you think?"
+        ));
+        // Fetch verb wins over opinion cue.
+        assert!(should_soft_compel_web_fetch(
+            "do you know this site? please fetch https://example.com anyway"
         ));
     }
 }

@@ -5,6 +5,7 @@ pub mod isolation;
 pub mod metrics;
 pub mod mutation_tracker;
 pub mod reporter;
+pub mod routing_offer_fixtures;
 pub mod runner;
 pub mod scenarios;
 pub mod speed_probe;
@@ -13,6 +14,10 @@ pub mod suite;
 
 pub use harness::BenchmarkHarness;
 pub use isolation::{BenchmarkIsolation, CleanupReport, IsolationMode, SideEffectFilter, ToolRiskLevel};
+pub use routing_offer_fixtures::{
+    all_routing_offer_fixtures, eval_routing_offer_fixture, run_all_routing_offer_fixtures,
+    RoutingOfferFixture,
+};
 pub use metrics::{
     BenchmarkReport, CleanupConfirmation, FailureAnalysis, FailureType, QualityMetrics, SpeedMetrics,
     StepTiming, SuiteSpeedAggregate,

@@ -27,6 +27,41 @@ pub(crate) fn trailing_json_recovery_triggered(config: &AppConfig, content: &str
     !config.is_llamacpp() && trailing_content_after_valid_llm_json(content)
 }
 
+/// Scorecard: URL in user text, `web:fetch` offered, model did not call it this hop.
+fn maybe_log_url_skip_fetch(
+    url_fetch_offered: bool,
+    soft_compel_injected: bool,
+    turn_seq: u64,
+    transition: &StateTransition,
+) {
+    if !url_fetch_offered {
+        return;
+    }
+    // Recover / fatal / reflection hops are not Idle skip-fetch events.
+    let (called_fetch, tool_count, outcome) = match transition {
+        StateTransition::ExecuteTools(tools) => {
+            let called = tools.iter().any(|t| t.name == "web:fetch");
+            (called, tools.len(), "execute_tools")
+        }
+        StateTransition::Halt => (false, 0, "halt_idle"),
+        StateTransition::ShiftToReflection => (false, 0, "reflect"),
+        StateTransition::Recover { .. } => return,
+        StateTransition::Fatal(_) | StateTransition::Continue => return,
+    };
+    if called_fetch {
+        return;
+    }
+    tracing::info!(
+        category = routing_codes::CATEGORY_ROUTING,
+        issue = routing_codes::ISSUE_PRELLM_URL_SKIP_FETCH,
+        turn_seq,
+        soft_compel_injected,
+        tool_count,
+        outcome,
+        "URL present and web:fetch offered; model did not call web:fetch this hop"
+    );
+}
+
 impl<E: LlmEngine> Orchestrator<E> {
     /// The main cognitive loop.
     ///
@@ -144,6 +179,9 @@ impl<E: LlmEngine> Orchestrator<E> {
 
         // ── Tool-enabled loop (full schemas) ─────────────────────────
         loop {
+            // URL scorecard (Phase 3): set each hop when fetch is offered with a URL in user text.
+            let mut url_fetch_offered_this_hop = false;
+            let mut url_soft_compel_injected = false;
             // 1. Bailout Checks
             if self.recovery_count >= self.max_recovery_attempts {
                 tracing::warn!(
@@ -314,25 +352,28 @@ impl<E: LlmEngine> Orchestrator<E> {
                 system_prompt.push_str("\n\n---\n\n");
                 system_prompt.push_str(&skill);
             }
-            // Soft-compel: URL in user text + web:fetch offered → prompt bias (Idle still allowed).
-            if tools_needed
-                && crate::orchestrator::routing::should_soft_compel_web_fetch(
-                    self.last_user_content(),
-                )
-            {
-                // Empty matched tools = full roster (fetch available). Named hits must include fetch.
+            // URL scorecard + soft-compel: fetch offered with URL → may inject prompt bias.
+            // Opinion-only phrasing skips the hint but still counts toward skip-fetch telemetry.
+            if tools_needed {
+                let user_line = self.last_user_content();
                 let fetch_offered = pre_llm_matched_tools.is_empty()
                     || pre_llm_matched_tools.iter().any(|n| n == "web:fetch");
-                if fetch_offered {
-                    system_prompt.push_str("\n\n---\n\n");
-                    system_prompt
-                        .push_str(crate::orchestrator::routing::URL_SOFT_COMPEL_HINT);
-                    tracing::info!(
-                        category = routing_codes::CATEGORY_ROUTING,
-                        issue = routing_codes::ISSUE_PRELLM_URL_SOFT_COMPEL,
-                        turn_seq = self.turn_seq,
-                        "URL soft-compel hint injected into system prompt"
-                    );
+                if fetch_offered
+                    && crate::orchestrator::routing::user_text_has_url(user_line)
+                {
+                    url_fetch_offered_this_hop = true;
+                    if crate::orchestrator::routing::should_soft_compel_web_fetch(user_line) {
+                        system_prompt.push_str("\n\n---\n\n");
+                        system_prompt
+                            .push_str(crate::orchestrator::routing::URL_SOFT_COMPEL_HINT);
+                        url_soft_compel_injected = true;
+                        tracing::info!(
+                            category = routing_codes::CATEGORY_ROUTING,
+                            issue = routing_codes::ISSUE_PRELLM_URL_SOFT_COMPEL,
+                            turn_seq = self.turn_seq,
+                            "URL soft-compel hint injected into system prompt"
+                        );
+                    }
                 }
             }
             Self::upsert_system_prompt(&mut self.chat_stack, system_prompt);
@@ -595,6 +636,12 @@ impl<E: LlmEngine> Orchestrator<E> {
                     .clamp_transition_for_tool_round_cap_recovery(transition, &response.content)
                     .await;
             }
+            maybe_log_url_skip_fetch(
+                url_fetch_offered_this_hop,
+                url_soft_compel_injected,
+                turn_seq,
+                &transition,
+            );
             match transition {
                 StateTransition::ExecuteTools(tools) => {
                     let decision = self
