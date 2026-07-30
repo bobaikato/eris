@@ -1,0 +1,133 @@
+# Release pipeline (roadmap R1 — docs/updated_architecture/11_OSS_SHIPPING_ROADMAP.md §5.2).
+#
+# Trigger: pushing a version tag (e.g. `git push origin v0.1.1-alpha`).
+# A tag alone does NOT publish binaries — this workflow is what turns the tag
+# into a GitHub Release WITH ASSETS that install-linux.sh can download.
+#
+# It builds eris for x86_64-unknown-linux-gnu, packs the tarball the installer
+# expects (eris at archive root), writes SHA256SUMS, aligns the published
+# companions.toml [eris].release_tag to this tag, and uploads:
+#   - eris-x86_64-unknown-linux-gnu.tar.gz
+#   - SHA256SUMS
+#   - companions.toml
+#   - models.toml
+#   - install-linux.sh
+name: Release
+
+on:
+  push:
+    tags:
+      # Semver source milestones (what real users install).
+      - "v*"
+      # Distribution/testing channel — re-cut freely to exercise the pipeline
+      # without minting a new version. Published as a GitHub pre-release.
+      - "dist-*"
+
+# Needed for the workflow's GITHUB_TOKEN to create/edit the Release + upload assets.
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-unknown-linux-gnu
+
+jobs:
+  release:
+    name: Build, pack, publish (${{ github.ref_name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build eris (release, ${{ env.TARGET }})
+        run: cargo build --release --bin eris --target "$TARGET"
+
+      # Archive contract (§5.4): the tarball must contain a file named `eris`
+      # at the top level, because install-linux.sh runs `tar -xzf … -C bin eris`.
+      - name: Pack tarball
+        run: |
+          set -euo pipefail
+          mkdir -p dist/stage
+          cp -f "target/${TARGET}/release/eris" dist/stage/eris
+          tar -C dist/stage -czf "dist/eris-${TARGET}.tar.gz" eris
+          echo "Archive contents (must list exactly 'eris'):"
+          tar -tzf "dist/eris-${TARGET}.tar.gz"
+
+      # Standard format: "<hash>  <filename>" per line (§5.2.3). Relative
+      # filename so `sha256sum -c SHA256SUMS` works from the download dir.
+      - name: Write SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum "eris-${TARGET}.tar.gz" > SHA256SUMS
+          cat SHA256SUMS
+
+      # Publish the two pin TOMLs + installer alongside the binary. Align the
+      # published companions.toml [eris].release_tag to the tag being released
+      # (roadmap R3) so Option B installers fetch a self-consistent manifest.
+      - name: Stage pin manifests + installer
+        run: |
+          set -euo pipefail
+          cp -f distribution/models.toml dist/models.toml
+          cp -f install-linux.sh dist/install-linux.sh
+          sed -E "s/^release_tag = \"[^\"]*\"/release_tag = \"${GITHUB_REF_NAME}\"/" \
+            distribution/companions.toml > dist/companions.toml
+          echo "Published companions.toml [eris] tag line:"
+          grep -E "^release_tag" dist/companions.toml
+
+      # Upload assets onto the Release for this tag (creates the Release if the
+      # tag was pushed without one). `gh` uses the GITHUB_TOKEN from `env`.
+      - name: Create / update GitHub Release with assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          # dist-* and pre-1.0 -alpha/-beta/-rc tags are pre-releases: they must
+          # never be surfaced as "Latest" to strangers on the Releases page.
+          PRERELEASE=""
+          case "$TAG" in
+            dist-*|*-alpha|*-beta|*-rc*) PRERELEASE="--prerelease" ;;
+          esac
+          NOTES="$(cat <<EOF
+          Eris ${TAG} — Linux x86_64 (dry-run alpha).
+
+          Assets:
+          - eris-${TARGET}.tar.gz (eris at archive root)
+          - SHA256SUMS (verify: sha256sum -c SHA256SUMS --ignore-missing)
+          - companions.toml / models.toml (pin manifests fetched by install-linux.sh)
+          - install-linux.sh
+
+          Pins on this release:
+          - llama.cpp Vulkan tag: b10189 (Linux x86_64)
+          - browser39: v1.8.0
+          - chat model: Gemma 4 E4B Q4_K_M
+          - embed model: nomic-embed-text v1.5 Q8_0
+          EOF
+          )"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG exists; uploading/overwriting assets."
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+              "dist/eris-${TARGET}.tar.gz" \
+              dist/SHA256SUMS \
+              dist/companions.toml \
+              dist/models.toml \
+              dist/install-linux.sh
+          else
+            echo "Creating release $TAG with assets."
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" \
+              --notes "$NOTES" \
+              $PRERELEASE \
+              "dist/eris-${TARGET}.tar.gz" \
+              dist/SHA256SUMS \
+              dist/companions.toml \
+              dist/models.toml \
+              dist/install-linux.sh
+          fi

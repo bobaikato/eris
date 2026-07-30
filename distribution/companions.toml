@@ -1,0 +1,99 @@
+# =============================================================================
+# Eris companion pin manifest (roadmap L3 — docs/updated_architecture/11_OSS_SHIPPING_ROADMAP.md)
+#
+# SOURCE OF TRUTH for every non-model artifact the installer fetches.
+# Keep `install-linux.sh` pin variables in sync in the SAME change.
+#
+# Rules:
+#   * Every downloadable artifact MUST carry a sha256. Installers fail CLOSED
+#     on mismatch — there is no --ignore-hash.
+#   * "SHA256_HERE" / "vX.Y.Z" means not yet published (or deliberately open).
+#     Installers refuse to run while a *required* pin is still a placeholder.
+#   * No `cargo install` on this path. Prebuilt assets only.
+# =============================================================================
+
+schema_version = 1
+
+# -----------------------------------------------------------------------------
+# Eris itself — built by this repo's release CI, published as a GitHub Release
+# with SHA256SUMS. Tag v0.1.1-alpha exists but currently has **zero** binary
+# assets — leave sha256 as SHA256_HERE until release CI uploads the tarball.
+# -----------------------------------------------------------------------------
+[eris]
+repo        = "janpauldahlke/eris"
+release_tag = "v0.1.1-alpha"        # bump when a release with binaries exists
+
+[eris.assets.linux-x86_64]
+# M1a target: x86_64-unknown-linux-gnu (see scripts/release-targets.txt)
+# Dry-run hash of locally packed tarball (2026-07-30). Release CI must
+# regenerate SHA256SUMS for the artifact it actually uploads (§5.4).
+asset  = "eris-x86_64-unknown-linux-gnu.tar.gz"
+sha256 = "83a2605efe26a6a0f6cdbecb55734544dbea41563412a004b60f981578b725fd"
+
+# [eris.assets.linux-aarch64]   # M1b — enable when aarch64 CI lands
+# asset  = "eris-aarch64-unknown-linux-gnu.tar.gz"
+# sha256 = "SHA256_HERE"
+
+# -----------------------------------------------------------------------------
+# llama-server — Linux default = VULKAN (official ggml-org release asset).
+# GPU API *is* the binary; there is no backend = "vulkan" config key.
+# Asset is a .tar.gz (not .zip). Verified against GitHub release asset digest.
+# -----------------------------------------------------------------------------
+[llama_cpp]
+tag = "b10189"
+
+[llama_cpp.assets.linux-x86_64-vulkan]
+url    = "https://github.com/ggml-org/llama.cpp/releases/download/b10189/llama-b10189-bin-ubuntu-vulkan-x64.tar.gz"
+sha256 = "4271dae63443e2cdde3e1359e900df7a3f3edaf81414f95638cde4b92761d5a6"
+# Driver expectation: working Vulkan ICD. `vulkaninfo --summary` should succeed.
+
+# Optional later (M1b):
+# [llama_cpp.assets.linux-aarch64-vulkan]
+# url    = "https://github.com/ggml-org/llama.cpp/releases/download/b10189/llama-b10189-bin-ubuntu-vulkan-arm64.tar.gz"
+# sha256 = "1bda0341651500d5fcd518cf006b904d5557751ac811a0e0a66f70370bc14c97"
+
+# Optional later (M2 macOS Metal — official macos-arm64 pack is CPU/Metal family):
+# [llama_cpp.assets.macos-aarch64]
+# url    = "https://github.com/ggml-org/llama.cpp/releases/download/b10189/llama-b10189-bin-macos-arm64.tar.gz"
+# sha256 = "2534f61b16013786b3bb8b8f4eb86326b9614733a3670c721e99a608285a8017"
+
+# -----------------------------------------------------------------------------
+# browser39 — upstream prebuilt CLI. Digests from GitHub Releases API (v1.8.0).
+# https://github.com/alejandroqh/browser39/releases/tag/v1.8.0
+# -----------------------------------------------------------------------------
+[browser39]
+repo = "alejandroqh/browser39"
+tag  = "v1.8.0"
+
+[browser39.assets.linux-x86_64]
+asset  = "browser39-linux-x64"
+sha256 = "2b214d677262fd061dbb30be3d8e43385a773c51f9a00fc102695086b8c8d3af"
+
+# [browser39.assets.linux-aarch64]  # M1b
+# asset  = "browser39-linux-arm64"
+# sha256 = "b96621f23b7ea7b70beec789c2345f8822b3d3322b87d7360024a30304fe5657"
+
+# [browser39.assets.macos-aarch64]  # M2
+# asset  = "browser39-macos-arm64"
+# sha256 = "dc88e339fe60ac5d29c50671e5b97d682622b2edb4ac64ebb917ddbd527c23d0"
+
+# -----------------------------------------------------------------------------
+# Ollama — official install.sh, pinned by sha256 of the *current* snapshot.
+# WARNING: this URL is mutable. When upstream edits install.sh, our hash breaks
+# and a human must re-download, review, and re-pin. That is intended.
+# Snapshot taken 2026-07-30.
+# -----------------------------------------------------------------------------
+[ollama]
+install_script_url    = "https://ollama.com/install.sh"
+install_script_sha256 = "25f64b810b947145095956533e1bdf56eacea2673c55a7e586be4515fc882c9f"
+
+# -----------------------------------------------------------------------------
+# Qdrant — Docker image pinned by multi-arch manifest digest (v1.18.3).
+# -----------------------------------------------------------------------------
+[qdrant]
+image  = "qdrant/qdrant"
+tag    = "v1.18.3"
+digest = "sha256:0bd98fa7977f1e75694779359ca4e212822e5a71334e28421182f72f209d5286"
+http_port = 6333
+grpc_port = 6334
+volume    = "eris-qdrant-data"

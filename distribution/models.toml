@@ -1,0 +1,72 @@
+# =============================================================================
+# Eris blessed model manifest (roadmap L4 — docs/updated_architecture/11_OSS_SHIPPING_ROADMAP.md)
+#
+# Every GGUF the installer downloads is pinned: exact URL + filename + sha256
+# (Hugging Face LFS oid). Installers fail CLOSED on mismatch.
+#
+# Keep `install-linux.sh` variables in sync in the SAME change.
+# =============================================================================
+
+schema_version = 1
+
+# -----------------------------------------------------------------------------
+# DEFAULT TIER — installer fetches these with no flags.
+# Marketed floor: GPU with >= ~8GB VRAM. Gemma 4 E4B Q4_K_M is ~4.6GB on disk.
+# -----------------------------------------------------------------------------
+
+[default.chat]
+name           = "Gemma 4 E4B instruct, Q4_K_M (unsloth)"
+filename       = "gemma-4-E4B-it-Q4_K_M.gguf"
+url            = "https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF/resolve/main/gemma-4-E4B-it-Q4_K_M.gguf"
+sha256         = "85a896a047553e842f25297ee5b031d64ff30147d9c4af17b1e4b394cd1fab87"
+approx_size_gb = 4.6
+ollama_tag     = "gemma4:e4b"
+
+[default.embed]
+name           = "nomic-embed-text v1.5, Q8_0"
+filename       = "nomic-embed-text-v1.5.Q8_0.gguf"
+url            = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf"
+sha256         = "3e24342164b3d94991ba9692fdc0dd08e3fd7362e0aacc396a9a5c54a544c3b7"
+approx_size_gb = 0.14
+ollama_tag     = "nomic-embed-text"
+
+# -----------------------------------------------------------------------------
+# COMFORT TIER — documented upgrade only; installer does not fetch these.
+# -----------------------------------------------------------------------------
+
+[comfort.chat]
+name           = "Gemma 3 12B instruct, Q4_K_M (GGUF); Ollama comfort tag gemma4:12b"
+filename       = "gemma-3-12b-it-Q4_K_M.gguf"
+url            = "https://huggingface.co/ggml-org/gemma-3-12b-it-GGUF/resolve/main/gemma-3-12b-it-Q4_K_M.gguf"
+sha256         = "7bb69bff3f48a7b642355d64a90e481182a7794707b3133890646b1efa778ff5"
+approx_size_gb = 6.8
+ollama_tag     = "gemma4:12b"
+note           = "Needs roughly 12GB+ VRAM. GGUF pin is Gemma 3 12B until a Gemma 4 12B HF asset is chosen; Ollama users can pull gemma4:12b."
+
+# -----------------------------------------------------------------------------
+# ALTERNATIVES — smaller dense 4B if E4B is too heavy on disk/VRAM.
+# -----------------------------------------------------------------------------
+
+[alternatives.gemma3_4b_q4_k_m]
+name           = "Gemma 3 4B instruct, Q4_K_M"
+filename       = "gemma-3-4b-it-Q4_K_M.gguf"
+url            = "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf"
+sha256         = "882e8d2db44dc554fb0ea5077cb7e4bc49e7342a1f0da57901c0802ea21a0863"
+approx_size_gb = 2.3
+ollama_tag     = "gemma3:4b"
+note           = "Smaller on-disk alternative to Gemma 4 E4B."
+
+# -----------------------------------------------------------------------------
+# OTHER MODELS — hint text for installer / manual (no picker UI in M1).
+# -----------------------------------------------------------------------------
+
+[hints]
+other_models = """
+Eris runs any chat/embed GGUF that fits your VRAM. To try another model:
+drop the .gguf under ~/.local/share/eris/models/ and point your vault's
+.fcp/config.toml at it ([llama_cpp] chat_model_path / embed_model_path),
+or `ollama pull <tag>` on the Ollama backend. Only the models pinned in
+distribution/models.toml are checksum-verified by the installer — anything
+else you vet yourself. Keep the embed model unchanged unless you know the
+vector width matches your Qdrant collection.
+"""
