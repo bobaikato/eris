@@ -40,6 +40,10 @@ pub struct LlmGenerateOptions {
     /// When `false`, llama.cpp omits the `grammar` field from the HTTP request unless [`Self::grammar_override`] is set.
     /// Used for internal summarization passes that are not FCP agent JSON.
     pub attach_session_grammar: bool,
+    /// When `Some`, OpenRouter sends `response_format: {type: "json_schema", strict: true, schema}`
+    /// built from the same offered-tool set as the GBNF subset. Ollama and llama.cpp ignore this.
+    /// Mutually exclusive with [`Self::grammar_override`] by backend.
+    pub response_json_schema: Option<Arc<serde_json::Value>>,
 }
 
 impl Default for LlmGenerateOptions {
@@ -48,6 +52,7 @@ impl Default for LlmGenerateOptions {
             temperature: None,
             grammar_override: None,
             attach_session_grammar: true,
+            response_json_schema: None,
         }
     }
 }

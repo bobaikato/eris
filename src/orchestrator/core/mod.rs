@@ -5,6 +5,7 @@ mod deck;
 mod helpers;
 mod llama_gbnf_subset;
 mod moltbook_browse_ledger;
+mod openai_schema_subset;
 mod llm_directive;
 mod orchestrator;
 mod pre_llm_routing;

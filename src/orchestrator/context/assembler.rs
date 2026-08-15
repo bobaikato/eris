@@ -641,6 +641,7 @@ mod tests {
         let mut gatekeeper = crate::tools::gatekeeper::Gatekeeper::new();
         gatekeeper.register(Arc::new(crate::tools::system::health::SystemHealthTool {
             config: Arc::new(crate::config::AppConfig::default()),
+            token_metrics: None,
         }));
         let assembled = assembler
             .assemble_slim_tool_map(&state, &ephemeral, &gatekeeper, None, &[], false)

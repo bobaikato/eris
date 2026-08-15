@@ -236,6 +236,24 @@ pub async fn start_chat_session(
             };
             format!("llama-chat={chat}, llama-embed={embed}")
         }
+        crate::config::LlmBackend::OpenRouter => {
+            let model = config
+                .openrouter
+                .as_ref()
+                .map(|or| or.model.as_str())
+                .unwrap_or("unset");
+            let embed = match config.resolved_embed_backend() {
+                crate::config::EmbedBackend::Ollama => "ollama".to_string(),
+                crate::config::EmbedBackend::LlamaCpp => {
+                    if peripheral_lifecycle.started_llama_embed() {
+                        "llama-embed started by eris".to_string()
+                    } else {
+                        "llama-embed external".to_string()
+                    }
+                }
+            };
+            format!("openrouter={model} (remote, no chat daemon), embed={embed}")
+        }
     };
     let qdrant_status = if peripheral_lifecycle.started_qdrant() {
         "started by eris"
@@ -270,24 +288,32 @@ pub async fn start_chat_session(
                 .with_token_metrics(token_metrics_tx);
             AnyEngine::LlamaCpp(llamacpp_engine)
         }
+        LlmBackend::OpenRouter => {
+            let openrouter_engine = crate::engine::OpenRouterClient::new(config.clone())?
+                .with_token_metrics(token_metrics_tx);
+            AnyEngine::OpenRouter(openrouter_engine)
+        }
     };
     let ollama_arc = Arc::new(client);
 
-    let embed_provider: Arc<dyn crate::engine::EmbeddingProvider> = match config.llm_backend {
-        crate::config::LlmBackend::Ollama => Arc::new(
-            crate::engine::embedding::OllamaEmbedding::new(
-                ollama_arc.clone(),
-                config.embed_model_name.clone(),
+    // Embeddings key off the decoupled embed backend (not the chat backend), so
+    // OpenRouter chat + local embeddings coexist.
+    let embed_provider: Arc<dyn crate::engine::EmbeddingProvider> =
+        match config.resolved_embed_backend() {
+            crate::config::EmbedBackend::Ollama => Arc::new(
+                crate::engine::embedding::OllamaEmbedding::new(
+                    ollama_arc.clone(),
+                    config.embed_model_name.clone(),
+                ),
             ),
-        ),
-        crate::config::LlmBackend::LlamaCpp => {
-            let lc = config.validate_llamacpp_config()?;
-            Arc::new(crate::engine::embedding::LlamaCppEmbedding::new(
-                &lc.embed_server_url,
-                config.generation_timeout_secs,
-            )?)
-        }
-    };
+            crate::config::EmbedBackend::LlamaCpp => {
+                let lc = config.validate_llamacpp_embed_config()?;
+                Arc::new(crate::engine::embedding::LlamaCppEmbedding::new(
+                    &lc.embed_server_url,
+                    config.generation_timeout_secs,
+                )?)
+            }
+        };
 
     crate::memory::semantic::validate_embedding_provider_vs_qdrant(
         config.as_ref(),
@@ -635,6 +661,9 @@ pub async fn start_chat_session(
     }
     gatekeeper.register(Arc::new(crate::tools::system::SystemHealthTool {
         config: config.clone(),
+        token_metrics: Some(crate::engine::TokenMetricsReader::new(
+            token_metrics_rx.clone(),
+        )),
     }));
 
     gatekeeper.register(Arc::new(crate::tools::media::MediaCatalogTool {

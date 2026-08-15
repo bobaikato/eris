@@ -462,6 +462,43 @@ impl<E: LlmEngine> Orchestrator<E> {
                 (None, true)
             };
 
+            // OpenRouter: parallel branch to the GBNF subset above — same offered-tool decisions,
+            // but compiled into a strict `response_format` JSON Schema. Mutually exclusive with
+            // `grammar_override` by backend. `None` (full-roster / empty-offered cases) lets the
+            // engine fall back to `json_object`, backed by the existing recovery loop.
+            let response_json_schema = if !self.config.is_openrouter() {
+                None
+            } else if !tools_needed {
+                Some(
+                    self.openai_schema_subset_cache
+                        .get_or_compile_subset(&self.gatekeeper, &[])?,
+                )
+            } else if !targeted_tools.is_empty() {
+                let names: Vec<String> = targeted_tools.iter().cloned().collect();
+                Some(
+                    self.openai_schema_subset_cache
+                        .get_or_compile_subset(&self.gatekeeper, &names)?,
+                )
+            } else if slim_assembly {
+                let offered = slim_offered_tool_names(
+                    &pre_llm_matched_tools,
+                    self.tool_map_offer_cap,
+                    moltbook_overlay_latched,
+                    &self.gatekeeper,
+                    &self.state,
+                );
+                if offered.is_empty() {
+                    None
+                } else {
+                    Some(
+                        self.openai_schema_subset_cache
+                            .get_or_compile_subset(&self.gatekeeper, &offered)?,
+                    )
+                }
+            } else {
+                None
+            };
+
             let response_result = tokio::select! {
                 res = async {
                     let llm_started = Instant::now();
@@ -473,6 +510,7 @@ impl<E: LlmEngine> Orchestrator<E> {
                         },
                         grammar_override,
                         attach_session_grammar,
+                        response_json_schema,
                     };
                     let out = self.engine.generate(&view, "", None, gen_options).await;
                     llm_ms_acc = llm_ms_acc.saturating_add(llm_started.elapsed().as_millis() as u64);

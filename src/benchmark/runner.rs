@@ -121,10 +121,12 @@ pub async fn run_benchmark(
     let ephemeral = Arc::new(EphemeralMemory::new(config.workspace.clone()));
 
     // Embeddings: vault config selects Ollama vs llama-server embed endpoint
-    let embed_provider: Arc<dyn crate::engine::EmbeddingProvider> = if config.llm_backend
-        == LlmBackend::LlamaCpp
+    // (decoupled from the chat backend so OpenRouter chat keeps local embeddings).
+    let embed_provider: Arc<dyn crate::engine::EmbeddingProvider> = if config
+        .resolved_embed_backend()
+        == crate::config::EmbedBackend::LlamaCpp
     {
-        let lc = config.validate_llamacpp_config()?;
+        let lc = config.validate_llamacpp_embed_config()?;
         Arc::new(crate::engine::embedding::LlamaCppEmbedding::new(
             &lc.embed_server_url,
             config.generation_timeout_secs,
@@ -196,6 +198,7 @@ pub async fn run_benchmark(
     }));
     gatekeeper.register(Arc::new(crate::tools::system::SystemHealthTool {
         config: config_arc.clone(),
+        token_metrics: None,
     }));
     gatekeeper.register(Arc::new(crate::tools::clock::ClockNowTool));
 
@@ -280,6 +283,17 @@ pub async fn run_benchmark(
             token_metrics_tx2,
         ));
         (speed_sample, engine_for_orchestrator)
+    } else if config.llm_backend == LlmBackend::OpenRouter {
+        // Hosted backend: skip the latency probe (a paid, non-deterministic call).
+        println!(
+            "[benchmark] OpenRouter backend: skipping speed probe (hosted; speed metrics will be zeros)"
+        );
+        let (token_metrics_tx, _token_metrics_rx) = token_metrics::channel();
+        let engine_for_orchestrator = AnyEngine::OpenRouter(
+            crate::engine::OpenRouterClient::new(config_arc.clone())?
+                .with_token_metrics(token_metrics_tx),
+        );
+        (SpeedMetrics::default(), engine_for_orchestrator)
     } else {
         let (token_metrics_tx, _token_metrics_rx) = token_metrics::channel();
         let probe_client = LlamaCppClient::new(config_arc.clone())?

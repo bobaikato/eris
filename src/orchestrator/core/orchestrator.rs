@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::llama_gbnf_subset::GbnfSubsetCache;
+use super::openai_schema_subset::JsonSchemaSubsetCache;
 use super::moltbook_browse_ledger::MoltbookBrowseLedger;
 use crate::tools::web::WebSessionLedger;
 
@@ -121,6 +122,9 @@ pub struct Orchestrator<E: LlmEngine> {
     pub(super) recent_successful_tools: Vec<String>,
     /// llama.cpp only: memoized GBNF strings keyed by sorted tool names for per-turn subset grammar.
     pub(super) gbnf_subset_cache: GbnfSubsetCache,
+    /// OpenRouter only: memoized envelope JSON Schemas keyed by sorted tool names (same offered
+    /// list as the GBNF subset — the two constraints cannot drift apart).
+    pub(super) openai_schema_subset_cache: JsonSchemaSubsetCache,
     /// Anti-crawl ledger shared with web tools (reset at chat bootstrap).
     pub web_ledger: Option<Arc<tokio::sync::Mutex<WebSessionLedger>>>,
     /// `web:fetch` + `news:today` invocations this user turn (orchestrator cap).
@@ -245,6 +249,7 @@ impl<E: LlmEngine> Orchestrator<E> {
             recent_successful_tools: Vec::new(),
             token_metrics_rx,
             gbnf_subset_cache: GbnfSubsetCache::new(),
+            openai_schema_subset_cache: JsonSchemaSubsetCache::new(),
             web_ledger,
             web_tool_calls_this_turn: 0,
             semantic,

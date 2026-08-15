@@ -700,6 +700,7 @@ mod tests {
         let mut gatekeeper = Gatekeeper::new();
         gatekeeper.register(Arc::new(SystemHealthTool {
             config: test_config(),
+            token_metrics: None,
         }));
         let ephemeral = Arc::new(EphemeralMemory::new("relay_ws".to_string()));
         let dir = tempfile::tempdir().expect("tempdir");
