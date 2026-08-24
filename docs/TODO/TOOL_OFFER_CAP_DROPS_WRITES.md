@@ -83,6 +83,16 @@ So: **band-aid yes, durable fix no.**
 3. **Write-intent overlay**: lexical / policy boost for persist|memorize|stage|commit|write → ensure `memory:stage` and/or `vault:write` survive the cap (mirror `doc:read`→`vault:write`).
 4. **Mid-turn re-offer**: after tool results, if user intent was multi-phase (fetch+persist) or model thought mentions stage/write, widen or re-run routing once.
 
+## Partially addressed (2026-08-24)
+
+The **`vision:see` → `media:catalog`** sub-case is fixed via an offer overlay in
+`src/orchestrator/routing/overlays.rs` (mirrors `doc:read` → `vault:write`): whenever
+`vision:see` is offered, `media:catalog` is force-appended if the state allows it, so the
+remember-image flow can always reach the catalog step regardless of the cap. Covered by
+`slim_offered_pairs_media_catalog_with_vision_see` in `llama_gbnf_subset.rs`. This is the
+durable-fix direction #3 (write-intent overlay) applied narrowly to the vision/media flow;
+the general `vault:write` / `memory:stage` cases (turns 8–9 above) remain open.
+
 ## Related
 
 - Soak note in `docs/TODO/REFACTOR_LLAMACPP_CONTEXT_HANDLING.md` (A3 / wiki dropped by cap=5) — same class.

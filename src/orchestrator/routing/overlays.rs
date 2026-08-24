@@ -1,7 +1,7 @@
 //! Slim-offer overlays shared by prompt assembly and GBNF subset selection.
 //!
 //! Single source of truth for: offer cap, Moltbook latch, `web:find` pairing,
-//! and `doc:read` → `vault:write`.
+//! `doc:read` → `vault:write`, and `vision:see` → `media:catalog`.
 
 use crate::orchestrator::state::AgentState;
 use crate::tools::Gatekeeper;
@@ -51,6 +51,18 @@ pub fn apply_offer_overlays(
         && Gatekeeper::state_allows_tool(state, "vault:write")
     {
         offered.push("vault:write".to_string());
+    }
+
+    // Remembering an image is always vision:see → media:catalog. media:catalog is a
+    // persist tool that embeds just below generic read/query tools, so the offer cap
+    // frequently truncates it out of the ranked subset (see docs/TODO/
+    // TOOL_OFFER_CAP_DROPS_WRITES.md). Pair it with vision:see so the catalog step is
+    // always reachable whenever vision is on the table.
+    if offered.iter().any(|n| n == "vision:see")
+        && !offered.iter().any(|n| n == "media:catalog")
+        && Gatekeeper::state_allows_tool(state, "media:catalog")
+    {
+        offered.push("media:catalog".to_string());
     }
 
     offered
