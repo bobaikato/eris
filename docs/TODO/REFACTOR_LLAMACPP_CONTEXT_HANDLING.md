@@ -26,6 +26,42 @@ Owner: (unassigned)
 - **Not yet done:** Phase 4 (adaptive `n_predict`, prompt-cache prefix stability),
   and the formal Ollama/llama.cpp golden-transcript regression fixtures.
 
+### Soak findings — vault `unknown` + Qwen3.8-27B-UD-Q3_K_XL (2026-08-24)
+
+Config under test: `ngl=99`, `flash_attn=on`, `cache_type_k/v=q8_0`, `num_ctx=32768`,
+`n_predict_max=1536`. Log: `vaults/unknown/.fcp/telemetry/logs/fcp_core.log.2026-08-24`.
+
+**Phase A — speed / OOM / multi-tool**
+- No JSON protocol failures on short turns. No OOM.
+- Decode ~**31–33 tok/s** (was ~4–7 with Q4 + `ngl=40` CPU offload). Confirmed speed win is full GPU offload.
+- A3 multi-tool briefing incomplete: `tool_map_offer_cap=5` + ranked subset dropped `wiki`/`vault` from the offer; model correctly used only offered tools (`weather:current`, `news:today`). Not a model crash.
+
+**Phase B — fold / recovery**
+- Wire fold active: `coalesced_runs` climbed **2 → 14** across tool-heavy hops. Fold projection doing its job.
+- B1: vault searches OK; empty-action recover once (huge thought + null `message_to_user`); then used `web:fetch`/`web:find` (wttr.in) instead of `weather:current` despite weather being re-offered on recover — still reached correct jacket conclusion.
+- B2: `memory:query` + `wiki:summary` clean; good synthesis.
+- B3: hit **`n_predict_max=1536` hard stop** → `EOF while parsing a string` mid-JSON → `RecoverFromFuckup` → second pass valid (850 toks). Recovery worked. Optional later: raise cap to 2048 (config-only).
+- **Condensation did not fire** in A/B. Peak ~10.5k prompt tokens; proactive line ≈ `32768 × 0.5 × 0.8 ≈ 13.1k`. One hop explicitly skipped condensation after parse fail.
+
+**Phase C — condensation** (2026-08-24 continuation) — **PASS**
+- Early hops: proactive fired (`stack_est` 13.7k–24k > threshold 13107) but
+  `nothing to fold` while tail still fit retain budget (~18k). Expected until older
+  prefix exceeded keep window.
+- Filler soak (SOAK_FILLER_1/2/3 + short trigger) forced real folds:
+  - **3× `fcp.condensation.complete`** before FOLDED reply (pass 1 each; no hard trim)
+  - First fold: 6 msgs / 451 tok → rolling JSON 975 chars (`prior_rolling=false`)
+  - Second: 10 msgs / 3174 tok → 2323 chars (`prior_rolling=true`, re-fold)
+  - Third: 8 msgs / 2537 tok → 1867 chars
+  - Fourth (post-probe): 1 msg / 248 tok → 1752 chars
+- Model replied `FOLDED` cleanly; probe correctly saw `rolling_summary_v1` system
+  JSON and recalled SOAK_FILLER_1 as alpha-batch padding (M1-0001…M1-0126).
+- Live process still logged soak-unaware proactive knobs (`ratio=0.8`, threshold 0.5);
+  on-disk `0.15`/`0.5` not loaded this session — fold still worked once stack > retain.
+- Optional later: visible break line above rolling summary (model already detects
+  `rolling_summary_v1`); **knobs restored aligned** in `unknown` config:
+  `condensation_threshold=0.55`, `optimize_context_proactive_condensation_ratio=1.0`
+  (proactive ≈ post-turn ≈ retain ~18k; needs Eris restart to load).
+
 Audience: humans + AI agents working on Eris/fcp
 Scope: architectural refactor of how the conversation transcript is modeled and
 handed to each LLM backend. **No behavior change to Ollama intended.** GBNF stays.
