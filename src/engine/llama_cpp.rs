@@ -90,7 +90,7 @@ struct ChatCompletionRequest<'a> {
     chat_template_kwargs: Option<serde_json::Value>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug, Clone)]
 struct ChatMsg {
     role: String,
     content: String,
@@ -179,43 +179,45 @@ fn normalize_system_messages(messages: Vec<ChatMsg>) -> Vec<ChatMsg> {
     out
 }
 
-/// llama-server rejects requests where two or more `assistant` messages appear at the end of
-/// `messages` (`invalid_request_error`). The orchestrator stack can legitimately end with several
-/// assistant rows (e.g. failed protocol JSON kept for recovery). Merge trailing assistant messages
-/// into one wire message so the API accepts the payload.
-fn merge_trailing_assistant_messages(mut messages: Vec<ChatMsg>) -> Vec<ChatMsg> {
-    if messages.len() < 2 {
-        return messages;
-    }
-    let n = messages.len();
-    let mut tail_asst = 0usize;
-    for i in (0..n).rev() {
-        if messages[i].role == "assistant" {
-            tail_asst += 1;
-        } else {
-            break;
+/// Coalesce consecutive same-role wire messages into one, guaranteeing strict
+/// `user`/`assistant` alternation after the leading system block.
+///
+/// This is the core of the long-context fix (see
+/// `docs/TODO/REFACTOR_LLAMACPP_CONTEXT_HANDLING.md`). After
+/// [`normalize_system_messages`] has folded stray `system` rows (tool results,
+/// directives) into `[System] …` **user** turns, a long tool-heavy session
+/// contains many *consecutive* `user` turns — a shape no chat template was
+/// trained on, which degrades quality deep into a session. Merging adjacent
+/// same-role turns restores the clean alternation the model expects, **without
+/// dropping any content** (safe for templates like Gemma that silently discard a
+/// native `tool` role — verified via `/apply-template`).
+///
+/// It also subsumes the old trailing-assistant merge: llama-server rejects two or
+/// more `assistant` messages at the tail, and coalescing collapses any run of
+/// assistant rows (trailing or interior) into a single wire message.
+fn coalesce_consecutive_roles(messages: Vec<ChatMsg>) -> Vec<ChatMsg> {
+    const SEP: &str = "\n\n";
+    let mut out: Vec<ChatMsg> = Vec::with_capacity(messages.len());
+    let mut coalesced_runs = 0usize;
+    for m in messages {
+        if let Some(last) = out.last_mut() {
+            if last.role == m.role {
+                last.content.push_str(SEP);
+                last.content.push_str(&m.content);
+                coalesced_runs += 1;
+                continue;
+            }
         }
+        out.push(m);
     }
-    if tail_asst < 2 {
-        return messages;
+    if coalesced_runs > 0 {
+        tracing::debug!(
+            coalesced_runs,
+            wire_messages = out.len(),
+            "llama_cpp: coalesced consecutive same-role turns for clean template alternation"
+        );
     }
-    let start = n - tail_asst;
-    tracing::debug!(
-        tail_asst,
-        "llama_cpp: merging trailing assistant messages for llama-server wire format"
-    );
-    const SEP: &str = "\n\n---[FCP prior assistant message]---\n\n";
-    let merged_content: String = messages[start..]
-        .iter()
-        .map(|m| m.content.as_str())
-        .collect::<Vec<_>>()
-        .join(SEP);
-    messages.truncate(start);
-    messages.push(ChatMsg {
-        role: "assistant".into(),
-        content: merged_content,
-    });
-    messages
+    out
 }
 
 async fn stream_sse_response(
@@ -290,11 +292,11 @@ impl LlmEngine for LlamaCppClient {
         let raw_messages: Vec<ChatMsg> = stack
             .iter()
             .map(|m| ChatMsg {
-                role: m.role.clone(),
+                role: m.role.as_str().to_string(),
                 content: m.content.clone(),
             })
             .collect();
-        let messages = merge_trailing_assistant_messages(normalize_system_messages(raw_messages));
+        let messages = coalesce_consecutive_roles(normalize_system_messages(raw_messages));
 
         let use_stream = stream_tx.is_some();
         let message_count = messages.len();
@@ -465,6 +467,7 @@ impl LlmEngine for LlamaCppClient {
 mod tests {
     use super::*;
     use crate::config::{LlamaCppConfig, LlmBackend};
+    use crate::engine::Role;
     use std::path::PathBuf;
     use tracing_test::traced_test;
     use wiremock::matchers::{method, path};
@@ -514,7 +517,7 @@ mod tests {
 
         let client = make_client_from_mock(&mock_server.uri());
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "Hi".into(),
         }];
         let result = client.generate(&stack, "", None, LlmGenerateOptions::default()).await.expect("generate");
@@ -551,7 +554,7 @@ mod tests {
             grammar: None,
         };
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "Hi".into(),
         }];
         client.generate(&stack, "", None, LlmGenerateOptions::default()).await.expect("generate");
@@ -575,7 +578,7 @@ mod tests {
         let client = make_client_from_mock(&mock_server.uri());
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "Hi".into(),
         }];
         let result = client
@@ -609,7 +612,7 @@ mod tests {
         let client = make_client_from_mock(&mock_server.uri());
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "test".into(),
         }];
         client
@@ -646,7 +649,7 @@ mod tests {
             grammar: None,
         };
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "Hi".into(),
         }];
         let err = client.generate(&stack, "", None, LlmGenerateOptions::default()).await.unwrap_err();
@@ -664,7 +667,7 @@ mod tests {
 
         let client = make_client_from_mock(&mock_server.uri());
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "Hi".into(),
         }];
         let err = client.generate(&stack, "", None, LlmGenerateOptions::default()).await.unwrap_err();
@@ -688,7 +691,7 @@ mod tests {
             grammar: None,
         };
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "Hi".into(),
         }];
         let err = client.generate(&stack, "", None, LlmGenerateOptions::default()).await.unwrap_err();
@@ -710,7 +713,7 @@ mod tests {
 
         let client = make_client_from_mock(&mock_server.uri());
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "Hi".into(),
         }];
         let result = client.generate(&stack, "", None, LlmGenerateOptions::default()).await.expect("generate");
@@ -733,7 +736,7 @@ mod tests {
         let client = make_client_from_mock(&mock_server.uri());
         let (tx, mut rx) = mpsc::unbounded_channel::<String>();
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "test".into(),
         }];
         let result = client
@@ -764,7 +767,7 @@ mod tests {
         let client = make_client_from_mock(&mock_server.uri());
         let (tx, _rx) = mpsc::unbounded_channel::<String>();
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "test".into(),
         }];
         let result = client
@@ -805,7 +808,7 @@ mod tests {
         };
         let tiny: Arc<str> = Arc::from("tiny-root-gbnf");
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "Hi".into(),
         }];
         client
@@ -865,7 +868,7 @@ mod tests {
             grammar: Some(Arc::new("large".repeat(500))),
         };
         let stack = vec![Message {
-            role: "user".into(),
+            role: Role::User,
             content: "Hi".into(),
         }];
         client
@@ -1048,8 +1051,9 @@ mod tests {
         }
     }
 
-    mod merge_trailing_assistant_messages_tests {
-        use super::super::{ChatMsg, merge_trailing_assistant_messages};
+    mod coalesce_and_fold_projection_tests {
+        use super::super::{ChatMsg, coalesce_consecutive_roles, normalize_system_messages};
+        use crate::engine::{Message, Role};
 
         fn user(s: &str) -> ChatMsg {
             ChatMsg {
@@ -1064,54 +1068,107 @@ mod tests {
             }
         }
 
+        /// The full llama.cpp wire projection as applied in `generate`.
+        fn project(stack: &[Message]) -> Vec<ChatMsg> {
+            let raw: Vec<ChatMsg> = stack
+                .iter()
+                .map(|m| ChatMsg {
+                    role: m.role.as_str().to_string(),
+                    content: m.content.clone(),
+                })
+                .collect();
+            coalesce_consecutive_roles(normalize_system_messages(raw))
+        }
+
+        /// Invariant helper: after the (optional) single leading system message,
+        /// no two adjacent turns share a role, and no `system` appears past index 0.
+        fn assert_clean_alternation(out: &[ChatMsg]) {
+            for (i, m) in out.iter().enumerate() {
+                if i > 0 {
+                    assert_ne!(m.role, "system", "system message past index 0 at {i}");
+                }
+            }
+            for w in out.windows(2) {
+                assert_ne!(w[0].role, w[1].role, "adjacent same-role turns: {:?}", w);
+            }
+        }
+
         #[test]
         fn empty_and_single_unchanged() {
-            assert!(merge_trailing_assistant_messages(vec![]).is_empty());
-            let one = vec![asst("only")];
-            let out = merge_trailing_assistant_messages(one);
+            assert!(coalesce_consecutive_roles(vec![]).is_empty());
+            let out = coalesce_consecutive_roles(vec![asst("only")]);
             assert_eq!(out.len(), 1);
             assert_eq!(out[0].content, "only");
         }
 
         #[test]
-        fn two_trailing_assistants_merged() {
-            let out = merge_trailing_assistant_messages(vec![user("u"), asst("a1"), asst("a2")]);
+        fn consecutive_users_coalesced() {
+            let out = coalesce_consecutive_roles(vec![user("a"), user("b"), asst("c")]);
             assert_eq!(out.len(), 2);
             assert_eq!(out[0].role, "user");
+            assert!(out[0].content.contains('a') && out[0].content.contains('b'));
             assert_eq!(out[1].role, "assistant");
-            assert!(out[1].content.contains("a1"));
-            assert!(out[1].content.contains("a2"));
-            assert!(out[1].content.contains("[FCP prior assistant message]"));
         }
 
         #[test]
-        fn internal_assistant_pair_not_merged() {
-            let out = merge_trailing_assistant_messages(vec![
-                user("u1"),
-                asst("mid1"),
-                asst("mid2"),
-                user("u2"),
-                asst("last"),
-            ]);
-            assert_eq!(out.len(), 5);
-            assert_eq!(out[3].role, "user");
-            assert_eq!(out[4].role, "assistant");
-            assert_eq!(out[4].content, "last");
-        }
-
-        #[test]
-        fn three_trailing_assistants_one_block() {
-            let out = merge_trailing_assistant_messages(vec![
-                user("u"),
-                asst("x"),
-                asst("y"),
-                asst("z"),
-            ]);
+        fn trailing_assistants_collapsed() {
+            let out = coalesce_consecutive_roles(vec![user("u"), asst("x"), asst("y"), asst("z")]);
             assert_eq!(out.len(), 2);
             assert_eq!(out[1].role, "assistant");
             assert!(out[1].content.contains('x'));
             assert!(out[1].content.contains('y'));
             assert!(out[1].content.contains('z'));
+        }
+
+        #[test]
+        fn tool_heavy_session_stays_alternating_and_lossless() {
+            // Mimics a long agent loop: assistant tool-call, then several system
+            // rows (tool result + directives), repeated.
+            let stack = vec![
+                Message::system("MAIN PROMPT"),
+                Message::user("weather in berlin and paris?"),
+                Message::assistant("{\"tool_calls\":[{\"name\":\"weather:get\"}]}"),
+                Message::system("Tool 'weather:get' succeeded: Berlin 25C"),
+                Message::system("[SYSTEM] cap note"),
+                Message::assistant("{\"tool_calls\":[{\"name\":\"weather:get\"}]}"),
+                Message::system("Tool 'weather:get' succeeded: Paris 22C"),
+                Message::assistant("{\"message_to_user\":\"Berlin 25C, Paris 22C\"}"),
+            ];
+            let out = project(&stack);
+            assert_eq!(out[0].role, "system");
+            assert!(out[0].content.contains("MAIN PROMPT"));
+            assert_clean_alternation(&out);
+            // No tool-result content is lost anywhere in the wire payload.
+            let joined = out.iter().map(|m| m.content.as_str()).collect::<String>();
+            assert!(joined.contains("Berlin 25C"));
+            assert!(joined.contains("Paris 22C"));
+            assert!(joined.contains("cap note"));
+        }
+
+        #[test]
+        fn projection_is_idempotent_in_shape() {
+            let stack = vec![
+                Message::system("S"),
+                Message::user("u"),
+                Message::assistant("a"),
+                Message::system("tool ok"),
+                Message::system("more tool ok"),
+                Message::assistant("a2"),
+            ];
+            let once = project(&stack);
+            // Re-projecting the wire result (as if it were the canonical stack) must
+            // not further change the role structure.
+            let as_messages: Vec<Message> = once
+                .iter()
+                .map(|m| Message {
+                    role: Role::from_wire(&m.role),
+                    content: m.content.clone(),
+                })
+                .collect();
+            let twice = project(&as_messages);
+            let roles_once: Vec<&str> = once.iter().map(|m| m.role.as_str()).collect();
+            let roles_twice: Vec<&str> = twice.iter().map(|m| m.role.as_str()).collect();
+            assert_eq!(roles_once, roles_twice);
         }
     }
 }

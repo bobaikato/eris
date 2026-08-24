@@ -569,6 +569,15 @@ impl PeripheralLifecycle {
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+            if let Some(ref fa) = lc.flash_attn {
+                cmd.arg("--flash-attn").arg(fa);
+            }
+            if let Some(ref ctk) = lc.cache_type_k {
+                cmd.arg("--cache-type-k").arg(ctk);
+            }
+            if let Some(ref ctv) = lc.cache_type_v {
+                cmd.arg("--cache-type-v").arg(ctv);
+            }
             // Qwen3+ chat templates: align with [`AppConfig::enable_reasoning_fsm`] / HTTP `chat_template_kwargs`.
             // Requires a recent `llama-server` that accepts `--reasoning` / `--reasoning-budget`.
             if !config.enable_reasoning_fsm {

@@ -1,7 +1,67 @@
 # Refactor: llama.cpp Long-Context Handling (Transcript Projection)
 
-Status: PROPOSAL / NOT STARTED
+Status: PARTIALLY IMPLEMENTED (Phase 1 + fold projection landed; 742 tests green, clippy clean)
 Owner: (unassigned)
+
+## Implementation log
+- **Phase 1 (Role enum) — DONE.** `crate::engine::Message.role` migrated from
+  `String` to `enum Role { System, User, Assistant }` (`src/engine/traits.rs`),
+  with `PartialEq<&str>` for ergonomic read-site compatibility. All construction
+  sites migrated. Ollama/llama.cpp backends map `Role` → their wire role exactly
+  as before. Behavior identical; full suite green.
+- **Phase 0 probe — DONE.** Live-tested Qwen3.5-9B + Gemma-4-12B on llama-server
+  b9571 (`--jinja` default-on) via `/v1/chat/completions` + `/apply-template`.
+  Result recorded in §3b: native `tool` role is **unsafe on Gemma** (content
+  silently dropped), so fold is the universal strategy.
+- **Fold projection (was Phase 3) — DONE.** llama.cpp wire projection is now
+  `coalesce_consecutive_roles(normalize_system_messages(raw))` in
+  `src/engine/llama_cpp.rs`. `normalize_system_messages` folds stray `system`
+  rows into `[System] …` user turns (leading systems merged); the new
+  `coalesce_consecutive_roles` merges adjacent same-role turns → strict
+  `user`/`assistant` alternation, no content loss (Gemma-safe), and it **subsumes
+  the old `merge_trailing_assistant_messages`** (now removed). Backend-derived (no
+  manual flag): only the llama.cpp path calls it; Ollama is untouched.
+  Unit tests cover alternation, tool-heavy losslessness, and shape idempotency.
+- **P1 native `tool` role — DEFERRED** (Gemma-unsafe; optional Qwen-only opt-in later).
+- **Not yet done:** Phase 4 (adaptive `n_predict`, prompt-cache prefix stability),
+  and the formal Ollama/llama.cpp golden-transcript regression fixtures.
+
+### Soak findings — vault `unknown` + Qwen3.8-27B-UD-Q3_K_XL (2026-08-24)
+
+Config under test: `ngl=99`, `flash_attn=on`, `cache_type_k/v=q8_0`, `num_ctx=32768`,
+`n_predict_max=1536`. Log: `vaults/unknown/.fcp/telemetry/logs/fcp_core.log.2026-08-24`.
+
+**Phase A — speed / OOM / multi-tool**
+- No JSON protocol failures on short turns. No OOM.
+- Decode ~**31–33 tok/s** (was ~4–7 with Q4 + `ngl=40` CPU offload). Confirmed speed win is full GPU offload.
+- A3 multi-tool briefing incomplete: `tool_map_offer_cap=5` + ranked subset dropped `wiki`/`vault` from the offer; model correctly used only offered tools (`weather:current`, `news:today`). Not a model crash.
+
+**Phase B — fold / recovery**
+- Wire fold active: `coalesced_runs` climbed **2 → 14** across tool-heavy hops. Fold projection doing its job.
+- B1: vault searches OK; empty-action recover once (huge thought + null `message_to_user`); then used `web:fetch`/`web:find` (wttr.in) instead of `weather:current` despite weather being re-offered on recover — still reached correct jacket conclusion.
+- B2: `memory:query` + `wiki:summary` clean; good synthesis.
+- B3: hit **`n_predict_max=1536` hard stop** → `EOF while parsing a string` mid-JSON → `RecoverFromFuckup` → second pass valid (850 toks). Recovery worked. Optional later: raise cap to 2048 (config-only).
+- **Condensation did not fire** in A/B. Peak ~10.5k prompt tokens; proactive line ≈ `32768 × 0.5 × 0.8 ≈ 13.1k`. One hop explicitly skipped condensation after parse fail.
+
+**Phase C — condensation** (2026-08-24 continuation) — **PASS**
+- Early hops: proactive fired (`stack_est` 13.7k–24k > threshold 13107) but
+  `nothing to fold` while tail still fit retain budget (~18k). Expected until older
+  prefix exceeded keep window.
+- Filler soak (SOAK_FILLER_1/2/3 + short trigger) forced real folds:
+  - **3× `fcp.condensation.complete`** before FOLDED reply (pass 1 each; no hard trim)
+  - First fold: 6 msgs / 451 tok → rolling JSON 975 chars (`prior_rolling=false`)
+  - Second: 10 msgs / 3174 tok → 2323 chars (`prior_rolling=true`, re-fold)
+  - Third: 8 msgs / 2537 tok → 1867 chars
+  - Fourth (post-probe): 1 msg / 248 tok → 1752 chars
+- Model replied `FOLDED` cleanly; probe correctly saw `rolling_summary_v1` system
+  JSON and recalled SOAK_FILLER_1 as alpha-batch padding (M1-0001…M1-0126).
+- Live process still logged soak-unaware proactive knobs (`ratio=0.8`, threshold 0.5);
+  on-disk `0.15`/`0.5` not loaded this session — fold still worked once stack > retain.
+- Optional later: visible break line above rolling summary (model already detects
+  `rolling_summary_v1`); **knobs restored aligned** in `unknown` config:
+  `condensation_threshold=0.55`, `optimize_context_proactive_condensation_ratio=1.0`
+  (proactive ≈ post-turn ≈ retain ~18k; needs Eris restart to load).
+
 Audience: humans + AI agents working on Eris/fcp
 Scope: architectural refactor of how the conversation transcript is modeled and
 handed to each LLM backend. **No behavior change to Ollama intended.** GBNF stays.
@@ -213,6 +273,38 @@ Everything else (GBNF, `n_predict`, prompt-cache) is secondary and additive.
 
 ---
 
+## 3b. Phase 0 probe results (live, llama-server b9571, `--jinja` default-on)
+
+Ran against real models via `/v1/chat/completions` and `/apply-template`:
+
+- **Model targets confirmed with operator:** Qwen3-class and **Gemma 4 12B** are the
+  primary models. Both must be supported.
+- **Server tolerance is now high.** Build `b9571` with jinja default-on returns
+  HTTP 200 for mid-conversation `system`, consecutive `user` turns, and bare
+  `tool` messages on *both* templates. **Structural acceptance ≠ correct
+  rendering** — the `normalize_system_messages` re-role hack predates this
+  permissiveness.
+- **CRITICAL — Gemma silently drops `role:"tool"`.** `/apply-template` on Gemma 4
+  renders a `tool` message as *nothing* (the content vanishes from the prompt):
+
+  ```
+  tool-role input →  <|turn>user\nread X<turn|><|turn>model\nok<turn|><|turn>user\n?<turn|>   # RESULT dropped
+  [System]-user   →  ...<|turn>user\n[System] RESULT_HELLO<turn|><|turn>user\n?<turn|>        # kept, but breaks alternation
+  ```
+
+- **Qwen3.5** *does* consume `tool`-role content correctly (answers from it), and
+  even accepts a **bare** `tool` message with no `tool_call_id`.
+
+**Design consequence (overrides §4.5 ordering):** native `tool` role (P1) is
+**model-dependent and unsafe as a default** — it loses data on Gemma. The
+**universal, correct strategy is P2 (fold)**: merge each tool-result /
+system-directive into an adjacent conversational turn, coalescing consecutive
+internal items, yielding clean `user/assistant` alternation with zero content
+loss on **both** Qwen and Gemma. P1 may later be enabled *only* for models proven
+to render tool content (capability-gated), but is not the default and not required.
+
+---
+
 ## 4. Target architecture
 
 ### 4.1 Two-layer model: **canonical semantic transcript** → **backend wire projection**
@@ -287,26 +379,26 @@ projection** so all wire-shaping lives in one place with one test suite.
 
 ### 4.5 How to represent tool results on llama.cpp (the crux)
 
-Preferred, in priority order:
+**Updated by the Phase 0 probe (see §3b): fold is the default, not tool-role.**
 
-- **(P1) Native `tool` role / `tool_calls`.** Qwen3's template (and llama-server's
-  OpenAI endpoint) understands assistant `tool_calls` + subsequent `role:"tool"`
-  results. If a `ToolResult` origin exists, emit it as a `tool` message tied to the
-  preceding assistant turn. This is the "correct" representation and keeps
-  alternation intact. **Must be validated against the exact template/build in
-  `docs/HOW_TO/LLAMA_CPP_SETUP.md`** (Phase 0 golden capture) because template
-  support varies by GGUF.
-- **(P2) Attach/fold into an adjacent conversational turn.** If native `tool` role
-  is not reliably supported by the target template, fold each `ToolResult` /
-  `SystemDirective` into the **next** `user` turn, or if none, append to the
-  **previous** `assistant` turn — as clearly-delimited context — so no *new*
-  speaker turn is created and alternation is preserved. Coalesce consecutive
-  same-side items into one block.
-- **(P3) Current behavior** (fake `[System]` user turns) becomes the explicit
-  fallback only, behind the flag, for templates that support neither.
+- **(P2 — DEFAULT) Fold into an adjacent conversational turn.** Merge each
+  `ToolResult` / `SystemDirective` / `RecoveryNote` into the **next** `user` turn
+  (preferred), or if none follows, append to the **previous** `assistant` turn, as
+  clearly-delimited context. Coalesce consecutive internal items into one block.
+  No new speaker turn is created, alternation is preserved, and **no content is
+  lost on any template** (verified safe on Qwen3.5 and Gemma 4). This is the
+  universal path.
+- **(P1 — OPTIONAL, capability-gated) Native `tool` role.** Only for models proven
+  by `/apply-template` to actually render `tool` content (Qwen: yes; **Gemma: NO —
+  content is silently dropped**). Off by default; never used unless a per-model
+  capability flag confirms safe rendering.
+- **(P3 — legacy) Fake `[System]` user turns.** The current behavior; kept only as
+  an internal A/B comparison path, not a target.
 
-The projection chooses P1/P2/P3 based on a capability probe (Phase 0/3), not
-guesswork.
+Rationale: structural HTTP-200 acceptance is not evidence of correct rendering.
+The projection must optimize for what the *template renders*, and folding is the
+only representation that is simultaneously alternation-clean and lossless across
+the models the operator actually runs.
 
 ### 4.6 Where GBNF, `n_predict`, prompt-cache fit
 
