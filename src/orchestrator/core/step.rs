@@ -232,7 +232,7 @@ impl<E: LlmEngine> Orchestrator<E> {
                         TOOL_ROUND_CAP_SYSTEM_GUIDANCE, self.tool_rounds, self.max_tool_rounds
                     );
                     self.chat_stack.push(crate::engine::Message {
-                        role: "system".to_string(),
+                        role: crate::engine::Role::System,
                         content: guidance,
                     });
                     tools_needed = false;
@@ -499,7 +499,7 @@ impl<E: LlmEngine> Orchestrator<E> {
                     };
 
                     self.chat_stack.push(crate::engine::Message {
-                        role: "system".to_string(),
+                        role: crate::engine::Role::System,
                         content: prompt,
                     });
                     self.state = AgentState::Idle;
@@ -595,7 +595,7 @@ impl<E: LlmEngine> Orchestrator<E> {
             self.emit_optional_user_message(&deck_content).await;
 
             self.chat_stack.push(crate::engine::Message {
-                role: "assistant".to_string(),
+                role: crate::engine::Role::Assistant,
                 content: deck_content,
             });
 
@@ -689,7 +689,7 @@ impl<E: LlmEngine> Orchestrator<E> {
                             );
                             self.state = AgentState::Chat;
                             self.chat_stack.push(crate::engine::Message {
-                                role: "system".to_string(),
+                                role: crate::engine::Role::System,
                                 content: message,
                             });
                             tools_needed = false;
