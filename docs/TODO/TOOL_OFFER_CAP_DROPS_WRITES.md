@@ -1,8 +1,10 @@
 # Tool offer cap drops write tools (persist / memorize)
 
-Status: OPEN — analysis only (2026-08-24); do not conflate with llama.cpp long-context merge  
-Log: `vaults/unknown/.fcp/telemetry/logs/fcp_core.log.2026-08-24` (after `--testrun2---`, turns ~6–9)  
-Config under test: `tool_map_offer_cap = 5`, slim phrase map on
+Status: **ADDRESSED in overlays (2026-08-26)** — domain verb completion for seated domains  
+Prior analysis: 2026-08-24 (do not conflate with llama.cpp long-context merge)  
+Log (original): `vaults/unknown/.fcp/telemetry/logs/fcp_core.log.2026-08-24` (after `--testrun2---`, turns ~6–9)  
+Log (reconfirm): `vaults/unknown/.fcp/telemetry/logs/fcp_core.log.2026-08-26` (curate `memory_exploration.md`, turn 15)  
+Config under test then: `tool_map_offer_cap = 5` / later `8`, slim phrase map on
 
 Audience: humans + AI agents working on Eris/fcp routing
 
@@ -10,10 +12,13 @@ Audience: humans + AI agents working on Eris/fcp routing
 
 ## Symptom
 
-User asks to **recon a site and persist** (or later: “memorize / persist findings in the vault”).
-Model researches with `web:fetch` / `web:find`, then reports it **cannot** call `memory:stage` /
-`vault:write` because they are “not in the toolset”. Operator sees writes in router `offered`
-lists in logs and assumes a Reflect / gatekeeper bug — it is not.
+User asks to **recon a site and persist** (or later: “memorize / persist findings in the vault”,
+“curate this note”).
+Model researches with `web:fetch` / `web:find` or reads with `vault:search`, then either
+reports it **cannot** call `memory:stage` / `vault:write` because they are “not in the
+toolset”, or plans `vault:write` in thought while GBNF only lists read/search verbs.
+Operator sees writes in router `offered` / `raw_matched` lists in logs and assumes a
+Reflect / gatekeeper bug — it is not.
 
 ## Clear picture (pipeline)
 
@@ -21,15 +26,19 @@ lists in logs and assumes a Reflect / gatekeeper bug — it is not.
 user text
   → ToolRouter::match_tools
   → apply_routing_policy (RANKED_SUBSET | AFFINITY_MARGIN_UNION | …)
-  → RoutingDecision.matched_tool_names()     ← often INCLUDES write tools
-  → apply_offer_overlays (.take(cap))        ← HERE writes often die
+  → RoutingDecision.matched_tool_names()     ← often INCLUDES one vault/memory verb
+  → apply_offer_overlays
+        · seed = highest-ranked prefix under cap
+        · complete all state-allowed verbs for each seed domain  ← fix lives here
+        · pairing overlays (web:find, doc:read→vault:write, …)
   → assemble_slim_tool_map / GBNF subset     ← model only sees this list
 ```
 
 Routing runs **once** per user `step()`; mid-turn tool hops **reuse** the same pre-LLM offer
-(`src/orchestrator/core/step.rs`). Sticky web-only offers after a fetch are a second failure mode.
+(`src/orchestrator/core/step.rs`). Sticky web-only offers after a fetch remain a second
+failure mode when **no** vault/memory seed ever entered the capped prefix.
 
-### Confirmed log cases
+### Confirmed log cases (pre-fix)
 
 **Turn 8 — “memorize…” (`AFFINITY_MARGIN_UNION`)**
 
@@ -48,13 +57,21 @@ Routing runs **once** per user `step()`; mid-turn tool hops **reuse** the same p
 - Model kept reading vault paths; Recover widened schemas (including `vault:write` /
   `memory:stage`) but then **empty-action** Recover loops → recovery budget exhausted.
 
+**2026-08-26 turn 15 — “curate … memory_exploration.md” (`RANKED_SUBSET`, cap=8)**
+
+- `raw_matched` never included `vault:write` (embed miss), but **did** include `vault:search`
+  and several `memory:*` verbs.
+- Blind prefix kept `vault:search` / `memory:stage` and dropped the rest of the vault verb
+  set — classic domain amputation, not “write never matched then truncated.”
+- Model thought “I will vault:write”, called `vault:search`, then empty-action Recover.
+
 **Earlier recon turn** — affinity / ranked web cluster sticky for whole hop chain; writes never
 entered the slim view even when thought said “I will memory:stage”.
 
 ## Root causes (ranked)
 
-1. **Blind prefix take after affinity expand** (`apply_offer_overlays` in
-   `src/orchestrator/routing/overlays.rs`): `.take(tool_map_offer_cap)` on cosine-ordered names.
+1. **Blind prefix take after affinity expand** (`apply_offer_overlays`): `.take(tool_map_offer_cap)`
+   on cosine-ordered names amputated sibling verbs of a domain that already had a seat.
 2. **Unscored sibling inheritance** (`rerank_offered_by_cosine` in
    `src/orchestrator/routing/policy.rs`): cluster siblings that never hit embed get
    `domain_best − ε`, so e.g. `memory:staged_list` can outrank a real `vault:write` hit.
@@ -62,11 +79,39 @@ entered the slim view even when thought said “I will memory:stage”.
    search/read/query than stage/write (no write-intent overlay analogous to `doc:read`→`vault:write`
    or `web:fetch`→`web:find`).
 4. **Sticky mid-turn offer**: persist-after-fetch never re-routes; web top-N stays locked.
+5. **Empty-action paralysis** (separate): even with write in the Recover/target set, the model
+   emits `Task` + thought + `tool_calls:[]` until recovery budget exhausts. Not fixed by offer
+   overlays.
 
 Not causes: Reflect allowlist (gatekeeper stayed `Chat`); missing write tools in registry;
 GBNF “disabling” writes.
 
-## Why raising `tool_map_offer_cap` alone is uncertain
+## Fix shipped (2026-08-26)
+
+**Domain verb completion** in [`src/orchestrator/routing/overlays.rs`](../../src/orchestrator/routing/overlays.rs):
+
+1. Cap still selects the **highest-ranked seed prefix** (which *domains* get a seat).
+2. For each domain in that prefix (rank order), offer **all** state-allowed `domain:*`
+   registered verbs: seed tools first, then remaining siblings (`cluster_members`).
+3. Completed domain sets may **exceed** `tool_map_offer_cap` — cap no longer amputates verbs
+   of a seated domain.
+4. Existing pairing overlays (`web:find`, `doc:read`→`vault:write`, `vision:see`→`media:catalog`,
+   Moltbook latch) still run after completion.
+
+Telemetry: `routing.offer.domain_verb_complete` when completion grows the offer.
+
+Tests: `vault_seed_completes_all_vault_verbs_past_cap` and siblings in `overlays.rs`.
+
+### Still open
+
+| Gap | Notes |
+|-----|--------|
+| Embed never seats vault/memory at all | Domain completion cannot invent a domain with zero seed hits (turn 16 “try again” → skills/web). |
+| Sibling inherit demotion | Optional follow-up in `rerank_offered_by_cosine`. |
+| Mid-turn re-offer | Persist-after-fetch sticky web offer. |
+| Empty-action Recover loops | Protocol / generation issue once tools are visible. |
+
+## Why raising `tool_map_offer_cap` alone was uncertain
 
 | Cap | Likely effect |
 |-----|----------------|
@@ -74,33 +119,10 @@ GBNF “disabling” writes.
 | 5 → 10+ | Still fails when web+vault reads fill the prefix (turn 9 pattern), or when sticky web affinity omits memory/vault entirely. |
 | 0 (uncapped) | Avoids truncate but blows slim prompt / GBNF size — defeats the improved router’s point. |
 
-So: **band-aid yes, durable fix no.**
-
-## Durable fix directions (pick later)
-
-1. **Smarter top-N**: domain-diverse selection (≤k per domain) and/or reserve ≥1 mutating slot when any write tool scored above threshold.
-2. **Inherit demotion**: unscored siblings must not outrank tools with real embed hits (or inherit with a larger penalty).
-3. **Write-intent overlay**: lexical / policy boost for persist|memorize|stage|commit|write → ensure `memory:stage` and/or `vault:write` survive the cap (mirror `doc:read`→`vault:write`).
-4. **Mid-turn re-offer**: after tool results, if user intent was multi-phase (fetch+persist) or model thought mentions stage/write, widen or re-run routing once.
-
-## Partially addressed (2026-08-24)
-
-The **`vision:see` → `media:catalog`** sub-case is fixed via an offer overlay in
-`src/orchestrator/routing/overlays.rs` (mirrors `doc:read` → `vault:write`): whenever
-`vision:see` is offered, `media:catalog` is force-appended if the state allows it, so the
-remember-image flow can always reach the catalog step regardless of the cap. Covered by
-`slim_offered_pairs_media_catalog_with_vision_see` in `llama_gbnf_subset.rs`. This is the
-durable-fix direction #3 (write-intent overlay) applied narrowly to the vision/media flow;
-the general `vault:write` / `memory:stage` cases (turns 8–9 above) remain open.
+Domain verb completion keeps the cap as a **domain seat** budget, not a **verb amputation** budget.
 
 ## Related
 
 - Soak note in `docs/TODO/REFACTOR_LLAMACPP_CONTEXT_HANDLING.md` (A3 / wiki dropped by cap=5) — same class.
 - `docs/HOW_TO/ADDING_A_TOOL.md` — routing layers + `tool_map_offer_cap`.
 - `docs/TODO/HANDOVER-doc-summarize-v1.md` — existing `doc:read`→`vault:write` auto-offer precedent.
-
-## Decision for now
-
-Postpone code change until after long-context / llama.cpp merge soak is closed. Optional operator
-experiment: temporarily set `tool_map_offer_cap = 8` on a vault and re-run a pure “persist this
-summary with memory:stage” prompt — expect partial improvement only.

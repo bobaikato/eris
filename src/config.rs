@@ -599,6 +599,19 @@ pub struct LlamaCppConfig {
     /// Chat `llama-server --cache-type-v` (e.g. `iq4_nl`, `q4_0`, `f16`). `None` = omit (server default).
     #[serde(default)]
     pub cache_type_v: Option<String>,
+    /// Chat `llama-server` mmproj GPU offload. `Some(true)` → `--mmproj-offload`, `Some(false)` →
+    /// `--no-mmproj-offload` (projector stays in system RAM; useful on tight VRAM when vision is rare).
+    /// `None` = omit (server default: GPU offload enabled).
+    #[serde(default)]
+    pub mmproj_offload: Option<bool>,
+    /// Chat `llama-server --spec-type` (e.g. `draft-mtp` for Qwen3.8 native multi-token prediction).
+    /// `None` = omit (server default `none`). Requires a recent llama-server that lists the type.
+    #[serde(default)]
+    pub spec_type: Option<String>,
+    /// Chat `llama-server --spec-draft-n-max` (tokens drafted per speculative step). `None` = omit
+    /// (server default is typically 3). Only meaningful when [`Self::spec_type`] is set.
+    #[serde(default)]
+    pub spec_draft_n_max: Option<u32>,
 }
 
 pub(crate) fn default_llamacpp_ready_timeout() -> u64 {
@@ -642,6 +655,9 @@ impl Default for LlamaCppConfig {
             flash_attn: None,
             cache_type_k: None,
             cache_type_v: None,
+            mmproj_offload: None,
+            spec_type: None,
+            spec_draft_n_max: None,
         }
     }
 }
@@ -2463,6 +2479,34 @@ mod tests {
         assert_eq!(lc.flash_attn.as_deref(), Some("on"));
         assert_eq!(lc.cache_type_k.as_deref(), Some("q8_0"));
         assert_eq!(lc.cache_type_v.as_deref(), Some("q8_0"));
+    }
+
+    #[test]
+    fn round_trip_llamacpp_mmproj_offload_and_spec_type() {
+        let mut config = AppConfig::default();
+        config.llm_backend = LlmBackend::LlamaCpp;
+        config.llama_cpp = Some(LlamaCppConfig {
+            home: PathBuf::from("/opt/llama.cpp/build"),
+            chat_model_path: PathBuf::from("/models/chat.gguf"),
+            embed_model_path: PathBuf::from("/models/embed.gguf"),
+            n_gpu_layers: 99,
+            mmproj_offload: Some(false),
+            spec_type: Some("draft-mtp".into()),
+            spec_draft_n_max: Some(3),
+            ..Default::default()
+        });
+
+        let toml_str = toml::to_string(&config).expect("serialize");
+        assert!(toml_str.contains("mmproj_offload"), "{toml_str}");
+        assert!(toml_str.contains("spec_type"), "{toml_str}");
+        assert!(toml_str.contains("draft-mtp"), "{toml_str}");
+        assert!(toml_str.contains("spec_draft_n_max"), "{toml_str}");
+
+        let deserialized: AppConfig = toml::from_str(&toml_str).expect("deserialize");
+        let lc = deserialized.llama_cpp.expect("llama_cpp section");
+        assert_eq!(lc.mmproj_offload, Some(false));
+        assert_eq!(lc.spec_type.as_deref(), Some("draft-mtp"));
+        assert_eq!(lc.spec_draft_n_max, Some(3));
     }
 
     #[test]
