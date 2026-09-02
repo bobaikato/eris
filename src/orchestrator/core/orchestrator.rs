@@ -206,6 +206,7 @@ impl<E: LlmEngine> Orchestrator<E> {
                 workspace,
                 identity,
                 config.staged_memory_prompt_max_chars,
+                config.working_plan_prompt_max_chars,
             )
             .with_grammar_constraint(config.is_llamacpp()),
             tool_router,
