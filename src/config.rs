@@ -786,6 +786,9 @@ pub struct AppConfig {
     /// Max characters for the `[WORKING_PLAN]` block injected into system prompts; `0` disables.
     #[serde(default = "default_working_plan_prompt_max_chars")]
     pub working_plan_prompt_max_chars: usize,
+    /// When true, append `[RUNTIME_HINT]` on multi-step user text and/or open working-plan steps.
+    #[serde(default = "default_working_plan_runtime_hints")]
+    pub working_plan_runtime_hints: bool,
     /// When false, `news:today` is not registered.
     #[serde(default = "default_news_today_enabled")]
     pub news_today_enabled: bool,
@@ -1168,6 +1171,10 @@ fn default_staged_memory_prompt_max_chars() -> usize {
 /// Max size of the `[WORKING_PLAN]` block in the system prompt; `0` disables.
 fn default_working_plan_prompt_max_chars() -> usize {
     1200
+}
+
+fn default_working_plan_runtime_hints() -> bool {
+    true
 }
 
 /// When true, build a slimmer copy of history for the LLM via [`crate::orchestrator::context::build_llm_view`].
@@ -1817,6 +1824,7 @@ impl Default for AppConfig {
             turn_end_mention_enabled: default_turn_end_mention_enabled(),
             staged_memory_prompt_max_chars: default_staged_memory_prompt_max_chars(),
             working_plan_prompt_max_chars: default_working_plan_prompt_max_chars(),
+            working_plan_runtime_hints: default_working_plan_runtime_hints(),
             news_today_enabled: default_news_today_enabled(),
             weather_enabled: default_weather_enabled(),
             wiki_enabled: default_wiki_enabled(),
