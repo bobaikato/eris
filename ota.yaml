@@ -69,6 +69,9 @@ tasks:
 
   format:
     description: Verify canonical Rust formatting without changing files
+    notes: |
+      The current upstream tree has known formatting drift. This task remains useful as an
+      advisory baseline and is intentionally excluded from the default verify closure.
     category: lint
     command:
       exe: cargo
@@ -105,6 +108,9 @@ tasks:
 
   test:cargo-matrix-batch:
     description: Run the complete repository test surface through Eris's bounded batch runner
+    notes: |
+      This invokes the repository-owned cargo test-full shell runner. Ota retains its 47 batch
+      results and terminal outcome but does not independently model every command inside it.
     category: test
     command:
       exe: cargo
@@ -118,6 +124,9 @@ tasks:
 
   test:gatekeeper:allowed:
     description: Exercise one registered operation accepted by the Gatekeeper
+    notes: |
+      This is an isolated Rust fixture. Success does not prove live model execution, operator
+      configuration, or effective runtime policy outside the fixture.
     category: test
     command:
       exe: cargo
@@ -146,6 +155,9 @@ tasks:
 
   test:vault:read:
     description: Exercise a Markdown read through an isolated disposable vault fixture
+    notes: |
+      This is an isolated disposable Rust fixture. Success does not prove access to, mutation of,
+      or policy enforcement for a configured operator vault.
     category: test
     command:
       exe: cargo
@@ -174,6 +186,9 @@ tasks:
 
   test:gatekeeper:refused:
     description: Exercise one operation the Gatekeeper refuses in the selected state
+    notes: |
+      This is an isolated Rust negative-control fixture. Success proves its expected refusal, not
+      that a live model or every Eris tool path is governed by the same boundary.
     category: test
     command:
       exe: cargo
@@ -212,6 +227,10 @@ tasks:
 
   verify:
     description: Run the repository's canonical non-credentialed CI verification surface
+    notes: |
+      Success is bounded to compilation, Clippy, the source-owned test runner, and the three exact
+      vault/Gatekeeper fixtures. It does not establish model, Qdrant, live-session, hardware,
+      shipping, or repository-wide readiness.
     category: verify
     aggregate:
       tasks:
