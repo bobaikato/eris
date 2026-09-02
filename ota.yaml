@@ -37,12 +37,9 @@ tasks:
   setup:cargo:native:
     description: Hydrate Cargo dependencies from the committed lockfile into Ota's native cache
     category: setup
-    prepare:
-      kind: dependency_hydration
-      medium: package_dependencies
-      source:
-        kind: cargo
-        cwd: .
+    command:
+      exe: cargo
+      args: [fetch, --locked]
     requirements:
       toolchains: [rust]
     effects:
@@ -54,12 +51,9 @@ tasks:
   setup:cargo:container:
     description: Hydrate Cargo dependencies from the committed lockfile into the isolated container cache
     category: setup
-    prepare:
-      kind: dependency_hydration
-      medium: package_dependencies
-      source:
-        kind: cargo
-        cwd: .
+    command:
+      exe: cargo
+      args: [fetch, --locked]
     requirements:
       toolchains: [rust]
     effects:
@@ -277,7 +271,9 @@ agent:
     The Cargo hydration tasks are intentionally agent-authorized because they hydrate the committed
     lockfile only. `Cargo.lock` remains protected and the pressure lane rejects lockfile drift;
     native hydration uses an ignored repository-local cache and container hydration uses an
-    Ota-managed isolated cache; neither task mutates the developer's global Cargo cache.
+    Ota-managed isolated cache; neither task mutates the developer's global Cargo cache. The
+    structured commands retain `--locked` because Ota v1.6.27's typed Cargo hydration does not yet
+    expose lock enforcement.
     The default `verify` task is bounded to non-credentialed source and Gatekeeper controls; do not
     infer model, Qdrant, live-chat, hardware, or shipping readiness from a green result.
   bootstrap:
