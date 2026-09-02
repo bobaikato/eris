@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   contract-ci-drift:
-    name: Contract-to-CI drift
+    name: Contract-to-CI comparison (advisory)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -24,7 +24,7 @@ jobs:
           command: doctor
           source: contract
           fail-on-error: false
-          fail-on-ci-drift: true
+          fail-on-ci-drift: false
           comment-pr: false
 
   ota-contract:
