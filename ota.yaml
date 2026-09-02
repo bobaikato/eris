@@ -235,9 +235,11 @@ workflows:
       models, contact Qdrant, exercise live chat, validate hardware profiles, or prove the
       feature/shipping distribution lifecycle. Its vault and Gatekeeper controls are isolated Rust
       fixtures, not evidence about a configured operator vault or a live model-driven session. The
-      separate container pressure lane invokes each portable task directly because aggregates do
-      not own execution-mode selection. Hosted Windows execution remains unproved because the
-      current upstream tree contains a documentation filename that NTFS cannot check out.
+      native pressure preview selects `--native` explicitly because this contract also declares an
+      optional container context. The separate container pressure lane invokes each portable task
+      directly because aggregates do not own execution-mode selection. Hosted Windows execution
+      remains unproved because the current upstream tree contains a documentation filename that
+      NTFS cannot check out.
 
 agent:
   posture: readiness_strict

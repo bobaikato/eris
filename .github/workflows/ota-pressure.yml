@@ -81,7 +81,7 @@ jobs:
         id: preview
         continue-on-error: true
         shell: bash
-        run: ota up --workflow verify --agent --dry-run . --json > ota-pressure/up-dry-run.json
+        run: ota up --workflow verify --native --agent --dry-run . --json > ota-pressure/up-dry-run.json
 
       - name: Observe existing formatting baseline
         id: format
