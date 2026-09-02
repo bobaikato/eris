@@ -59,6 +59,13 @@ jobs:
         shell: bash
         run: mkdir -p ota-pressure
 
+      - name: Record exact toolchain posture
+        shell: bash
+        run: |
+          rustc --version --verbose > ota-pressure/rustc-version.txt
+          cargo --version --verbose > ota-pressure/cargo-version.txt
+          ota --version > ota-pressure/ota-version.txt
+
       - name: Validate contract
         id: validate
         continue-on-error: true
@@ -95,9 +102,10 @@ jobs:
         shell: bash
         run: |
           before_lock="$(git hash-object Cargo.lock)"
-          ota run verify --agent . 2>&1 | tee ota-pressure/verify.txt
+          ota run verify --agent --stream . 2>&1 | tee ota-pressure/verify.txt
           test "$(git hash-object Cargo.lock)" = "$before_lock"
           git diff --exit-code -- Cargo.lock
+          git diff --exit-code
 
       - name: Record exact lane outcomes
         if: always()
@@ -218,6 +226,7 @@ jobs:
           gatekeeper_refused=${{ steps.refused.outcome }}
           image=${{ steps.image.outcome }}
           EOF
+          git diff --exit-code
 
       - name: Upload retained container evidence
         if: always()

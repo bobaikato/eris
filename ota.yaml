@@ -239,7 +239,8 @@ workflows:
       optional container context. The separate container pressure lane invokes each portable task
       directly because aggregates do not own execution-mode selection. Hosted Windows execution
       remains unproved because the current upstream tree contains a documentation filename that
-      NTFS cannot check out.
+      NTFS cannot check out. Hosted evidence retains exact Rust, Cargo, and Ota versions, streams
+      the source-owned batch runner, and rejects tracked-file or Cargo.lock drift.
 
 agent:
   posture: readiness_strict
